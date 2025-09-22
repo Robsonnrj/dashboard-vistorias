@@ -209,7 +209,7 @@ with st.sidebar:
         init_om_store()
         init_vist_store()
         st.success("Recarregado do Google Sheets.")
-        st.experimental_rerun()
+        st.rerun()
 
     idx = st.session_state.get("menu_index", 0)
     escolha = option_menu(
