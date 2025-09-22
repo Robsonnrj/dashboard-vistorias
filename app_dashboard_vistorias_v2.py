@@ -40,7 +40,7 @@ VT_HEADERS = [
     "DATA DA SOLICITACAO",
 ]
 
-# ===================== GSheets (único bloco) =====================
+# ===================== GSheets helpers (únicos) =====================
 def has_gsheets() -> bool:
     return (
         "gcp_service_account" in st.secrets
@@ -93,7 +93,7 @@ def gs_upsert_om(nome: str, sigla: str, diretoria: str):
     if not df.empty and "Nome" in df.columns:
         existe = df["Nome"].astype(str).str.strip().str.lower().eq(nome.strip().lower()).any()
         if existe:
-            return  # já existe; mantém simples (se quiser, implementar update)
+            return
     gs_append_row("OMs", OM_HEADERS, {
         "Nome": nome.strip(),
         "Sigla": sigla.strip(),
@@ -101,19 +101,19 @@ def gs_upsert_om(nome: str, sigla: str, diretoria: str):
         "Criado em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
-# ===================== Helpers =====================
-def norm(s):
+# ===================== Utils =====================
+def _norm(s: str) -> str:
     s = str(s)
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
     return s.lower().strip()
 
 def achar(col_alvo, candidatos):
-    alvo_n = norm(col_alvo)
+    alvo_n = _norm(col_alvo)
     for c in candidatos:
-        if norm(c) == alvo_n:
+        if _norm(c) == alvo_n:
             return c
     for c in candidatos:
-        if alvo_n in norm(c):
+        if alvo_n in _norm(c):
             return c
     return None
 
@@ -131,11 +131,6 @@ def card_title(txt: str):
         f"{txt}</div>",
         unsafe_allow_html=True
     )
-# ---------- util: normalização/achadores ----------
-def _norm(s: str) -> str:
-    s = str(s)
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-    return s.lower().strip()
 
 def _col_or_none(df: pd.DataFrame, opts: list[str]) -> str | None:
     cols = list(df.columns)
@@ -152,21 +147,11 @@ def _col_or_none(df: pd.DataFrame, opts: list[str]) -> str | None:
                 return c
     return None
 
-# ---------- util: garantir worksheet + cabeçalho ----------
-def _ensure_ws_with_header(sheet, title: str, header: list[str]):
-    try:
-        ws = sheet.worksheet(title)
-    except gspread.WorksheetNotFound:
-        ws = sheet.add_worksheet(title=title, rows=2000, cols=max(10, len(header)))
-        ws.update("1:1", [header])
-        return ws
-    # garante cabeçalho correto
-    head = ws.row_values(1)
-    if head != header:
-        ws.update("1:1", [header])
+def _ensure_ws_with_header(title: str, header: list[str]):
+    ws = _get_ws(title, header)
+    # (_get_ws já garante o header)
     return ws
 
-# ---------- util: append em lotes ----------
 def _append_batch(ws, rows: list[list], chunk=200):
     import math
     if not rows:
@@ -177,16 +162,6 @@ def _append_batch(ws, rows: list[list], chunk=200):
         a = i * chunk
         b = min((i + 1) * chunk, n)
         ws.append_rows(rows[a:b], value_input_option="USER_ENTERED")
-
-# ---------- util: ler existentes para deduplicação ----------
-def _existing_keys(ws, key_cols: list[str]) -> set[tuple]:
-    data = ws.get_all_records()
-    if not data:
-        return set()
-    df = pd.DataFrame(data)
-    if not all(k in df.columns for k in key_cols):
-        return set()
-    return set(tuple(str(df.loc[i, k])) for i in df.index for k in [key_cols] )  # placeholder (não usar)
 
 # ===================== Persistência local (fallback) =====================
 def init_om_store():
@@ -213,35 +188,124 @@ def init_vist_store():
         except Exception:
             pass
         try:
-            st.session_state.vist_cad = pd.read_csv("vistorias_local.csv", parse_dates=["DATA DA SOLICITACAO"])
+            st.session_state.vist_cad = pd.read_csv(
+                "vistorias_local.csv", parse_dates=["DATA DA SOLICITACAO"]
+            )
         except Exception:
             st.session_state.vist_cad = pd.DataFrame(columns=VT_HEADERS)
 
-# ===================== Leitura de Excel (opcional) =====================
+# ===================== Importar Excel -> Sheets =====================
+def importar_excel_para_sheets(df: pd.DataFrame) -> dict:
+    """
+    Lê o DF enviado (upload) e envia:
+      - Vistorias -> aba 'Vistorias'
+      - OMs       -> aba 'OMs' (a partir das OMs únicas encontradas)
+    Retorna um resumo com contagens.
+    """
+    if not has_gsheets():
+        raise RuntimeError("Google Sheets está OFF. Configure os secrets antes de importar.")
+
+    resumo = {"vistorias_importadas": 0, "vistorias_puladas_dup": 0,
+              "oms_importadas": 0, "oms_puladas_existentes": 0}
+
+    c_obj = _col_or_none(df, ["OBJETO DE VISTORIA", "OBJETO"])
+    c_om  = _col_or_none(df, ["OM APOIADA", "OM APOIADORA", "OM"])
+    c_dir = _col_or_none(df, ["Diretoria Responsavel", "Diretoria Responsável", "Diretoria"])
+    c_urg = _col_or_none(df, ["Classificacao da Urgencia","Classificação da Urgência","Urgencia"])
+    c_sit = _col_or_none(df, ["Situacao", "Situação"])
+    c_data_solic = _col_or_none(df, ["DATA DA SOLICITACAO", "DATA DA SOLICITAÇÃO"])
+
+    tem_minimo = all([c_obj, c_om, c_data_solic])
+
+    # ---------- VISTORIAS ----------
+    if tem_minimo:
+        if c_data_solic in df.columns:
+            df[c_data_solic] = pd.to_datetime(df[c_data_solic], errors="coerce")
+
+        header_v = VT_HEADERS
+        ws_v = _ensure_ws_with_header("Vistorias", header_v)
+
+        exist_raw = ws_v.get_all_records()
+        if exist_raw:
+            df_exist = pd.DataFrame(exist_raw)
+            if "DATA DA SOLICITACAO" in df_exist.columns:
+                df_exist["DATA DA SOLICITACAO"] = pd.to_datetime(
+                    df_exist["DATA DA SOLICITACAO"], errors="coerce"
+                )
+            exist_keys = set(
+                (
+                    str(df_exist.loc[i, "OBJETO DE VISTORIA"]).strip(),
+                    str(df_exist.loc[i, "OM APOIADA"]).strip(),
+                    str(df_exist.loc[i, "DATA DA SOLICITACAO"].date())
+                    if pd.notna(df_exist.loc[i, "DATA DA SOLICITACAO"])
+                    else "",
+                )
+                for i in df_exist.index
+            )
+        else:
+            exist_keys = set()
+
+        rows_to_add = []
+        for _, r in df.iterrows():
+            obj = str(r.get(c_obj, "")).strip()
+            om  = str(r.get(c_om, "")).strip()
+            data = r.get(c_data_solic, pd.NaT)
+            data_str = str(pd.to_datetime(data).date()) if pd.notna(data) else ""
+
+            if not obj or not om:
+                continue
+
+            key = (obj, om, data_str)
+            if key in exist_keys:
+                resumo["vistorias_puladas_dup"] += 1
+                continue
+
+            diretoria = str(r.get(c_dir, "")).strip() if c_dir else ""
+            urg      = str(r.get(c_urg, "")).strip() if c_urg else ""
+            sit      = str(r.get(c_sit, "")).strip() if c_sit else ""
+
+            rows_to_add.append([obj, om, diretoria, urg, sit, data_str])
+
+        if rows_to_add:
+            _append_batch(ws_v, rows_to_add, chunk=200)
+            resumo["vistorias_importadas"] = len(rows_to_add)
+
+    # ---------- OMs ----------
+    if c_om:
+        pares_dir = {}
+        if c_dir:
+            tmp = df[[c_om, c_dir]].dropna().drop_duplicates()
+            for _, r2 in tmp.iterrows():
+                pares_dir[str(r2[c_om]).strip()] = str(r2[c_dir]).strip()
+        oms_unicas = sorted([str(x).strip() for x in df[c_om].dropna().unique()])
+
+        header_o = OM_HEADERS
+        ws_o = _ensure_ws_with_header("OMs", header_o)
+
+        exist_raw_o = ws_o.get_all_records()
+        df_exist_o = pd.DataFrame(exist_raw_o) if exist_raw_o else pd.DataFrame(columns=header_o)
+        exist_oms = set(df_exist_o["Nome"].astype(str).str.strip()) if "Nome" in df_exist_o.columns else set()
+
+        rows_om = []
+        for nome in oms_unicas:
+            if not nome or nome in exist_oms:
+                resumo["oms_puladas_existentes"] += 1
+                continue
+            diretoria = pares_dir.get(nome, "")
+            rows_om.append([nome, "", diretoria, datetime.now().strftime("%Y-%m-%d %H:%M")])
+
+        if rows_om:
+            _append_batch(ws_o, rows_om, chunk=200)
+            resumo["oms_importadas"] = len(rows_om)
+
+    return resumo
+
+# ===================== Leitura de Excel (upload/local) =====================
 arquivo = st.sidebar.file_uploader(
     "Envie o Excel (.xlsx) ou deixe em branco para usar o arquivo da pasta",
     type=["xlsx"],
     help="Se vazio, o app tenta abrir 'Acomp. de Vistorias CRO1 - 2025.xlsx' na raiz do projeto.",
 )
-# ---- botao: importar excel -> google sheets
-with st.sidebar:
-    if df_raw is not None and HAS_GSHEETS:
-        st.markdown("### ⚙️ Importar Excel para o Google Sheets")
-        st.caption("As vistorias irão para a aba **Vistorias** e as OMs para **OMs** (sem duplicar).")
-        if st.button("📤 Enviar este Excel para o Sheets"):
-            try:
-                resumo = importar_excel_para_sheets(df_raw)
-                st.success(
-                    f"✅ Importação concluída!\n\n"
-                    f"- Vistorias importadas: **{resumo['vistorias_importadas']}** "
-                    f"(puladas por duplicidade: {resumo['vistorias_puladas_dup']})\n"
-                    f"- OMs importadas: **{resumo['oms_importadas']}** "
-                    f"(puladas por já existirem: {resumo['oms_puladas_existentes']})"
-                )
-            except Exception as e:
-                st.error(f"Falha ao importar para o Google Sheets: {e}")
-    elif df_raw is not None and not HAS_GSHEETS:
-        st.info("Para enviar este Excel ao Google Sheets, ative os secrets primeiro (HAS_GSHEETS = ON).")
 
 @st.cache_data
 def carregar_excel(file_like):
@@ -260,7 +324,7 @@ def carregar_excel(file_like):
 
 df_raw, aba, abas = carregar_excel(arquivo)
 
-# ===================== Navegação =====================
+# ===================== Navegação / Sidebar =====================
 PAGES = ["🏠 Início", "📝 Nova Vistoria", "🏢 Nova OM", "📑 Novo Relatório", "🔍 Consulta", "📊 Resumos (Dashboards)"]
 if "page" not in st.session_state:
     st.session_state.page = PAGES[0]
@@ -275,8 +339,35 @@ with st.sidebar:
     if not has_gsheets():
         st.sidebar.error("Secrets não detectado. Verifique .streamlit/secrets.toml e a seção [gsheets].")
 
+    # Botão para importar o Excel aberto (df_raw) para o Sheets
+    if df_raw is not None and has_gsheets():
+        st.markdown("### ⚙️ Importar Excel para o Google Sheets")
+        st.caption("As vistorias irão para **Vistorias** e as OMs para **OMs** (sem duplicar).")
+        if st.button("📤 Enviar este Excel para o Sheets"):
+            try:
+                resumo = importar_excel_para_sheets(df_raw)
+                st.success(
+                    f"✅ Importação concluída!\n\n"
+                    f"- Vistorias importadas: **{resumo['vistorias_importadas']}** "
+                    f"(puladas por duplicidade: {resumo['vistorias_puladas_dup']})\n"
+                    f"- OMs importadas: **{resumo['oms_importadas']}** "
+                    f"(puladas por já existirem: {resumo['oms_puladas_existentes']})"
+                )
+                # recarrega caches e stores
+                gs_read_df.clear()
+                for k in ("om_cad", "vist_cad"):
+                    if k in st.session_state:
+                        del st.session_state[k]
+                init_om_store()
+                init_vist_store()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Falha ao importar para o Google Sheets: {e}")
+    elif df_raw is not None and not has_gsheets():
+        st.info("Para enviar este Excel ao Google Sheets, ative os secrets primeiro.")
+
+    # Botão de refresh do Sheets
     if has_gsheets() and st.button("🔄 Atualizar do Sheets"):
-        # limpa caches e recarrega stores
         gs_read_df.clear()
         for k in ("om_cad", "vist_cad"):
             if k in st.session_state:
@@ -297,116 +388,7 @@ with st.sidebar:
     if escolha != st.session_state.page:
         st.session_state.page = escolha
         st.session_state.menu_index = PAGES.index(escolha)
-def importar_excel_para_sheets(df: pd.DataFrame) -> dict:
-    """
-    Lê o DF enviado (upload) e envia:
-      - Vistorias -> aba 'Vistorias'
-      - OMs       -> aba 'OMs' (a partir das OMs únicas encontradas)
-    Retorna um resumo com contagens.
-    """
-    if not HAS_GSHEETS or sh is None:
-        raise RuntimeError("Google Sheets está OFF. Configure os secrets antes de importar.")
 
-    resumo = {"vistorias_importadas": 0, "vistorias_puladas_dup": 0,
-              "oms_importadas": 0, "oms_puladas_existentes": 0}
-
-    # ---- mapear colunas do excel (tolerante a variações)
-    c_obj = _col_or_none(df, ["OBJETO DE VISTORIA", "OBJETO"])
-    c_om  = _col_or_none(df, ["OM APOIADA", "OM APOIADORA", "OM"])
-    c_dir = _col_or_none(df, ["Diretoria Responsavel", "Diretoria Responsável", "Diretoria"])
-    c_urg = _col_or_none(df, [
-        "Classificacao da Urgencia","Classificacao de Urgencia","Urgencia",
-        "Classificação da Urgência","Classificação de Urgencia"
-    ])
-    c_sit = _col_or_none(df, ["Situacao", "Situação"])
-    c_data_solic = _col_or_none(df, ["DATA DA SOLICITACAO", "DATA DA SOLICITAÇÃO"])
-
-    # Se não tiver ao menos OM/Objeto/Data, não dá pra importar vistorias
-    tem_minimo = all([c_obj, c_om, c_data_solic])
-
-    # ---------- VISTORIAS ----------
-    if tem_minimo:
-        # normaliza datas
-        if c_data_solic in df.columns:
-            df[c_data_solic] = pd.to_datetime(df[c_data_solic], errors="coerce")
-
-        header_v = [
-            "OBJETO DE VISTORIA","OM APOIADA","Diretoria Responsavel",
-            "Classificacao da Urgencia","Situacao","DATA DA SOLICITACAO"
-        ]
-        ws_v = _ensure_ws_with_header(sh, "Vistorias", header_v)
-
-        # deduplicação básica: (Objeto, OM, Data)
-        exist_raw = ws_v.get_all_records()
-        if exist_raw:
-            df_exist = pd.DataFrame(exist_raw)
-            # normaliza data de existentes
-            if "DATA DA SOLICITACAO" in df_exist.columns:
-                df_exist["DATA DA SOLICITACAO"] = pd.to_datetime(df_exist["DATA DA SOLICITACAO"], errors="coerce")
-            exist_keys = set(
-                (str(df_exist.loc[i, "OBJETO DE VISTORIA"]).strip(),
-                 str(df_exist.loc[i, "OM APOIADA"]).strip(),
-                 str(df_exist.loc[i, "DATA DA SOLICITACAO"].date()) if pd.notna(df_exist.loc[i, "DATA DA SOLICITACAO"]) else "")
-                for i in df_exist.index
-            )
-        else:
-            exist_keys = set()
-
-        rows_to_add = []
-        for _, r in df.iterrows():
-            obj = str(r.get(c_obj, "")).strip()
-            om  = str(r.get(c_om, "")).strip()
-            data = r.get(c_data_solic, pd.NaT)
-            data_str = str(pd.to_datetime(data).date()) if pd.notna(data) else ""
-
-            if not obj or not om:
-                continue  # linha incompleta
-
-            key = (obj, om, data_str)
-            if key in exist_keys:
-                resumo["vistorias_puladas_dup"] += 1
-                continue
-
-            diretoria = str(r.get(c_dir, "")).strip() if c_dir else ""
-            urg      = str(r.get(c_urg, "")).strip() if c_urg else ""
-            sit      = str(r.get(c_sit, "")).strip() if c_sit else ""
-
-            rows_to_add.append([obj, om, diretoria, urg, sit, data_str])
-
-        if rows_to_add:
-            _append_batch(ws_v, rows_to_add, chunk=200)
-            resumo["vistorias_importadas"] = len(rows_to_add)
-
-    # ---------- OMs ----------
-    if c_om:
-        # derivar OMs únicas do DF
-        pares_dir = {}
-        if c_dir:
-            tmp = df[[c_om, c_dir]].dropna().drop_duplicates()
-            for _, r2 in tmp.iterrows():
-                pares_dir[str(r2[c_om]).strip()] = str(r2[c_dir]).strip()
-        oms_unicas = sorted([str(x).strip() for x in df[c_om].dropna().unique()])
-
-        header_o = ["Nome","Sigla","Diretoria","Criado em"]
-        ws_o = _ensure_ws_with_header(sh, "OMs", header_o)
-
-        exist_raw_o = ws_o.get_all_records()
-        df_exist_o = pd.DataFrame(exist_raw_o) if exist_raw_o else pd.DataFrame(columns=header_o)
-        exist_oms = set(df_exist_o["Nome"].astype(str).str.strip()) if "Nome" in df_exist_o.columns else set()
-
-        rows_om = []
-        for nome in oms_unicas:
-            if not nome or nome in exist_oms:
-                resumo["oms_puladas_existentes"] += 1
-                continue
-            diretoria = pares_dir.get(nome, "")
-            rows_om.append([nome, "", diretoria, datetime.now().strftime("%Y-%m-%d %H:%M")])
-
-        if rows_om:
-            _append_batch(ws_o, rows_om, chunk=200)
-            resumo["oms_importadas"] = len(rows_om)
-
-    return resumo
 # ===================== Páginas =====================
 # Início
 if st.session_state.page == "🏠 Início":
@@ -414,14 +396,11 @@ if st.session_state.page == "🏠 Início":
     st.write("Use os cards abaixo ou o menu à esquerda para navegar.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("📝 Nova Vistoria", use_container_width=True):
-            goto("📝 Nova Vistoria")
+        if st.button("📝 Nova Vistoria", use_container_width=True): goto("📝 Nova Vistoria")
     with c2:
-        if st.button("🏢 Nova OM", use_container_width=True):
-            goto("🏢 Nova OM")
+        if st.button("🏢 Nova OM", use_container_width=True): goto("🏢 Nova OM")
     with c3:
-        if st.button("📊 Resumos (Dashboards)", use_container_width=True):
-            goto("📊 Resumos (Dashboards)")
+        if st.button("📊 Resumos (Dashboards)", use_container_width=True): goto("📊 Resumos (Dashboards)")
     st.info("Dica: envie a planilha na sidebar, se quiser sobrepor a que está na pasta.")
 
 # Nova Vistoria
@@ -430,7 +409,6 @@ elif st.session_state.page == "📝 Nova Vistoria":
     init_om_store()
     init_vist_store()
 
-    # OMs do Sheets (preferencial) + CSV + Excel
     oms = []
     om_to_dir = {}
 
@@ -487,7 +465,6 @@ elif st.session_state.page == "📝 Nova Vistoria":
                     "Situacao": situacao,
                     "DATA DA SOLICITACAO": pd.to_datetime(data_solic)
                 }
-                # grava no Sheets
                 if has_gsheets():
                     try:
                         payload = nova.copy()
@@ -496,16 +473,13 @@ elif st.session_state.page == "📝 Nova Vistoria":
                         )
                         gs_append_row("Vistorias", VT_HEADERS, payload)
                         st.success("✅ Vistoria registrada no Google Sheets!")
-                        # recarregar stores
                         gs_read_df.clear()
-                        for k in ("vist_cad",):
-                            if k in st.session_state:
-                                del st.session_state[k]
+                        if "vist_cad" in st.session_state:
+                            del st.session_state["vist_cad"]
                         init_vist_store()
                     except Exception as e:
                         st.warning(f"Falha ao salvar no Google Sheets. Farei fallback local. Detalhes: {e}")
 
-                # atualiza sessão e CSV
                 st.session_state.vist_cad = pd.concat(
                     [st.session_state.vist_cad, pd.DataFrame([nova])],
                     ignore_index=True
@@ -515,7 +489,6 @@ elif st.session_state.page == "📝 Nova Vistoria":
                         st.session_state.vist_cad.to_csv("vistorias_local.csv", index=False, encoding="utf-8-sig")
                     except Exception as e:
                         st.warning(f"Falha ao salvar CSV local. Detalhes: {e}")
-
                 st.success("✅ Vistoria registrada!")
                 st.rerun()
 
@@ -541,12 +514,9 @@ elif st.session_state.page == "🏢 Nova OM":
 
     with st.form("form_om", clear_on_submit=True):
         colA, colB, colC = st.columns([2, 1, 2])
-        with colA:
-            nome = st.text_input("Nome da OM", placeholder="Ex.: 1º DSUP")
-        with colB:
-            sigla = st.text_input("Sigla", placeholder="Ex.: DSUP")
-        with colC:
-            diretoria = st.text_input("Diretoria de Subordinação", placeholder="Ex.: DECEx / COTER / DGP")
+        with colA: nome = st.text_input("Nome da OM", placeholder="Ex.: 1º DSUP")
+        with colB: sigla = st.text_input("Sigla", placeholder="Ex.: DSUP")
+        with colC: diretoria = st.text_input("Diretoria de Subordinação", placeholder="Ex.: DECEx / COTER / DGP")
 
         salvar_csv = st.checkbox("Salvar em arquivo local (om_cadastro.csv)", value=not has_gsheets())
         submit = st.form_submit_button("Salvar OM")
@@ -565,7 +535,6 @@ elif st.session_state.page == "🏢 Nova OM":
                     try:
                         gs_upsert_om(nova["Nome"], nova["Sigla"], nova["Diretoria"])
                         st.success("✅ OM registrada no Google Sheets!")
-                        # recarrega OMs
                         gs_read_df.clear()
                         if "om_cad" in st.session_state:
                             del st.session_state["om_cad"]
@@ -586,8 +555,7 @@ elif st.session_state.page == "🏢 Nova OM":
                 st.rerun()
 
     st.subheader("OMs cadastradas")
-    st.dataframe(st.session_state.om_cad.sort_values("Criado em", ascending=False),
-                 use_container_width=True)
+    st.dataframe(st.session_state.om_cad.sort_values("Criado em", ascending=False), use_container_width=True)
 
 # Novo Relatório
 elif st.session_state.page == "📑 Novo Relatório":
@@ -616,7 +584,6 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
     st.title("📊 Resumos (Dashboards)")
     init_vist_store()
 
-    # Se não tiver Excel, usa apenas as vistorias criadas no app
     if df_raw is None or df_raw.empty:
         df = st.session_state.vist_cad.copy()
         if df.empty:
@@ -635,24 +602,15 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
 
     st.caption(f"Aba carregada: **{aba}**  •  Abas no arquivo: {abas}")
 
-    # Mapeamento robusto
-    cols = list(df.columns)
     def col_or_none(opts):
-        from unicodedata import normalize
-        def n(s):
-            s = str(s)
-            s = normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-            return s.lower().strip()
-        # exata
         for o in opts:
-            for c in cols:
-                if n(c) == n(o):
+            for c in df.columns:
+                if _norm(c) == _norm(o):
                     return c
-        # contém
         for o in opts:
-            alvo = n(o)
-            for c in cols:
-                if alvo in n(c):
+            alvo = _norm(o)
+            for c in df.columns:
+                if alvo in _norm(c):
                     return c
         return None
 
@@ -667,7 +625,6 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
     c_dias_exec  = col_or_none(["QUANTIDADE DE DIAS PARA EXECUCAO", "QUANTIDADE DE DIAS PARA EXECUÇÃO"])
     c_status     = col_or_none(["STATUS - ATUALIZACAO SEMANAL", "Status"])
 
-    # Tipos
     for c in [c_data_solic, c_data_vist]:
         if c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
@@ -675,7 +632,6 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    # Filtros
     st.sidebar.subheader("Filtros")
     col_data_base = c_data_solic if c_data_solic in df.columns else c_data_vist
     if col_data_base and df[col_data_base].notna().any():
@@ -710,7 +666,6 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
     if om_sel and c_om in df.columns:
         df_f = df_f[df_f[c_om].astype(str).isin(om_sel)]
 
-    # KPIs
     colk1, colk2, colk3, colk4, colk5 = st.columns(5)
     total_vist = len(df_f)
     finalizadas = df_f[c_sit].astype(str).str.upper().str.contains("FINALIZADA").sum() if c_sit in df_f.columns else None
@@ -730,7 +685,6 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
 
     st.divider()
 
-    # Gráficos
     if col_data_base and df_f[col_data_base].notna().any():
         tmp = (df_f.groupby(pd.Grouper(key=col_data_base, freq="MS")).size().reset_index(name="Vistorias"))
         fig1 = px.line(tmp, x=col_data_base, y="Vistorias", markers=True, title="Evolução Mensal de Vistorias")
@@ -756,7 +710,8 @@ elif st.session_state.page == "📊 Resumos (Dashboards)":
         base["Dentro SLA"] = base[c_dias_total] <= sla_dias
         tmp_sla = (base.groupby(c_dir)["Dentro SLA"].mean()*100).reset_index(name="pct_sla")
         fig_sla = px.bar(tmp_sla.sort_values("pct_sla"), x="pct_sla", y=c_dir, orientation="h",
-                         title=f"% Dentro do SLA (≤{sla_dias}d) por Diretoria", labels={"pct_sla": "% dentro do SLA"})
+                         title=f"% Dentro do SLA (≤{sla_dias}d) por Diretoria",
+                         labels={"pct_sla": "% dentro do SLA"})
         st.plotly_chart(fig_sla, use_container_width=True)
 
     if col_data_base and c_sit in df_f.columns and df_f[col_data_base].notna().any():
