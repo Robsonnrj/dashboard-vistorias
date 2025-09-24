@@ -61,6 +61,61 @@ def _book():
     return _gs_client().open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
 
 def _ensure_ws_with_header(sheet, title: str, header: list[str]):
+
+    # ===== Leituras/gravações tolerantes a cabeçalho “bagunçado” =====
+import pandas as pd
+
+def _make_unique_headers(raw_headers):
+    """Gera nomes únicos: vazio -> col_1; duplicados -> nome_2, nome_3, ..."""
+    out, seen = [], {}
+    for j, h in enumerate(raw_headers, start=1):
+        h = (h or "").strip()
+        if not h:
+            h = f"col_{j}"
+        base = h
+        if base in seen:
+            seen[base] += 1
+            h = f"{base}_{seen[base]}"
+        else:
+            seen[base] = 1
+        out.append(h)
+    return out
+
+def read_ws_loose(ws, header_row=None) -> pd.DataFrame:
+    """
+    Lê a worksheet tolerando cabeçalho repetido/mesclado/vazio.
+    - Se header_row não for dado, usa a primeira linha com algum conteúdo.
+    - Garante nomes únicos nas colunas.
+    """
+    values = ws.get_all_values()
+    if not values:
+        return pd.DataFrame()
+
+    # descobre a linha do cabeçalho
+    if header_row is None:
+        hdr_idx = next(
+            (i for i, row in enumerate(values) if any(str(c).strip() for c in row)),
+            0
+        )
+    else:
+        hdr_idx = max(0, int(header_row) - 1)
+
+    headers = _make_unique_headers(values[hdr_idx])
+    body = values[hdr_idx + 1 :]
+
+    # remove linhas finais 100% vazias (opcional)
+    while body and not any(str(c).strip() for c in body[-1]):
+        body.pop()
+
+    df = pd.DataFrame(body, columns=headers).replace("", pd.NA)
+    return df
+
+def write_ws_over(ws, df: pd.DataFrame):
+    """Sobrescreve a aba a partir de A1 com o DataFrame mostrado na tela."""
+    ws.clear()
+    headers = list(df.columns)
+    rows = df.fillna("").astype(str).values.tolist()
+    ws.update("A1", [headers] + rows, value_input_option="USER_ENTERED")
     """Garante que a worksheet exista e tenha o cabeçalho informado."""
     try:
         ws = sheet.worksheet(title)
