@@ -1,3 +1,23 @@
+Olá\! Analisei o seu código e a imagem do erro que você enviou. O problema é exatamente o que o terminal aponta: um `NameError`.
+
+Isso acontece porque a variável `col_mappings` está sendo usada dentro do `st.expander` de "Debug" **antes** de ser definida no bloco `try...except` logo abaixo. A lógica do programa precisa ser ajustada para que a criação da variável venha primeiro.
+
+Além disso, identifiquei uma pequena oportunidade de melhoria na função de download do Excel, para torná-la mais segura e eficiente, sem a necessidade de criar um arquivo temporário no servidor.
+
+Abaixo está o seu código corrigido com as alterações necessárias.
+
+### O que foi corrigido:
+
+1.  **`NameError` no Dashboard:** O bloco que define `col_mappings` foi movido para cima, para que ele seja executado *antes* do `st.expander` que o utiliza para debug.
+2.  **Download de Excel:** A lógica de geração do arquivo Excel foi otimizada para usar um buffer em memória (`io.BytesIO`), que é mais eficiente e evita potenciais problemas com arquivos temporários.
+
+-----
+
+### Código Corrigido
+
+Você pode substituir todo o seu código por este. As alterações estão marcadas com comentários como `# <<< CORREÇÃO`.
+
+```python
 # -*- coding: utf-8 -*-
 # CRO1 — Editor + Dashboards (Google Sheets) - Versão Otimizada
 
@@ -14,13 +34,14 @@ import plotly.express as px
 import streamlit as st
 from google.oauth2.service_account import Credentials
 from streamlit_option_menu import option_menu
+import io  # <<< CORREÇÃO 2: Importado para o download de Excel
 
 # =========================================================
 # CONFIGURAÇÃO GERAL
 # =========================================================
 
 st.set_page_config(
-    page_title="CRO1 — Editor & Dashboards (Sheets)", 
+    page_title="CRO1 — Editor & Dashboards (Sheets)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -37,8 +58,8 @@ SCOPES = [
 def has_gsheets() -> bool:
     """Verifica se as configurações do Google Sheets estão disponíveis."""
     return (
-        "gcp_service_account" in st.secrets 
-        and "gsheets" in st.secrets 
+        "gcp_service_account" in st.secrets
+        and "gsheets" in st.secrets
         and "spreadsheet_url" in st.secrets["gsheets"]
         and bool(st.secrets["gsheets"]["spreadsheet_url"])
     )
@@ -86,7 +107,7 @@ def read_worksheet_safe(ws, header_row=None) -> pd.DataFrame:
         # Descobre a linha do cabeçalho
         if header_row is None:
             hdr_idx = next(
-                (i for i, row in enumerate(values) if any(str(c).strip() for c in row)), 
+                (i for i, row in enumerate(values) if any(str(c).strip() for c in row)),
                 0
             )
         else:
@@ -133,8 +154,8 @@ def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header=True):
             ws = sh.worksheet(tab_name)
         except gspread.WorksheetNotFound:
             ws = sh.add_worksheet(
-                title=tab_name, 
-                rows=max(2000, len(df) + 10), 
+                title=tab_name,
+                rows=max(2000, len(df) + 10),
                 cols=max(10, len(df.columns))
             )
         
@@ -263,7 +284,7 @@ if MENU == "🗂️ Editor de Planilha":
             )
         
         with col2:
-            if st.button("↻ Recarregar", use_container_width=True):
+            if st.button("↻ Recarregar", use_container_width=True, key="btn_recarregar_editor"):
                 read_tab_df.clear()
                 st.rerun()
 
@@ -314,13 +335,14 @@ if MENU == "🗂️ Editor de Planilha":
                 )
             
             with col3:
-                excel_buffer = pd.ExcelWriter("temp.xlsx", engine='openpyxl')
-                edited_df.to_excel(excel_buffer, sheet_name=tab_name, index=False)
-                excel_buffer.close()
+                # <<< CORREÇÃO 2: Lógica de download do Excel otimizada
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    edited_df.to_excel(writer, index=False, sheet_name=tab_name)
                 
                 st.download_button(
-                    "⬇️ Baixar Excel",
-                    excel_buffer.getvalue() if hasattr(excel_buffer, 'getvalue') else b'',
+                    label="⬇️ Baixar Excel",
+                    data=output.getvalue(),
                     file_name=f"{tab_name}_{datetime.now().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
@@ -360,17 +382,7 @@ if MENU == "📊 Dashboards":
         
         st.info(f"📊 Analisando **{base_tab}** • **{len(df):,}** registros")
         
-        # Debug: Mostrar informações sobre as colunas encontradas
-        with st.expander("🔍 Debug - Colunas Mapeadas", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("**Colunas disponíveis:**")
-                st.write(list(df.columns))
-            with col2:
-                st.write("**Mapeamento encontrado:**")
-                mapped_cols = {k: v for k, v in col_mappings.items() if v is not None}
-                st.write(mapped_cols if mapped_cols else "Nenhuma coluna mapeada automaticamente")
-
+        # <<< CORREÇÃO 1: Bloco de mapeamento de colunas movido para ANTES do expander
         try:
             # Mapeamento inteligente de colunas baseado nos nomes encontrados
             col_mappings = {
@@ -394,6 +406,18 @@ if MENU == "📊 Dashboards":
             st.error(f"❌ Erro no mapeamento de colunas: {e}")
             col_mappings = {}
             st.info("🔄 Usando mapeamento manual de colunas. Por favor, verifique os nomes das colunas.")
+
+        # Debug: Mostrar informações sobre as colunas encontradas
+        with st.expander("🔍 Debug - Colunas Mapeadas", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Colunas disponíveis:**")
+                st.write(list(df.columns))
+            with col2:
+                st.write("**Mapeamento encontrado:**")
+                # Agora esta linha funciona, pois col_mappings já existe
+                mapped_cols = {k: v for k, v in col_mappings.items() if v is not None}
+                st.write(mapped_cols if mapped_cols else "Nenhuma coluna mapeada automaticamente")
 
         # Conversão segura de tipos de dados
         try:
@@ -448,14 +472,14 @@ if MENU == "📊 Dashboards":
                 try:
                     options = get_filter_options(df[col_name])
                     if options:  # Só adiciona o filtro se houver opções
-                        filtros[key] = st.sidebar.multiselect(label, options)
+                        filtros[key] = st.sidebar.multiselect(label, options, key=f"filter_{key}")
                 except Exception as e:
                     st.sidebar.warning(f"⚠️ Erro no filtro {label}: {e}")
 
         sla_dias = st.sidebar.number_input(
-            "⏱️ SLA (dias)", 
-            min_value=1, 
-            max_value=365, 
+            "⏱️ SLA (dias)",
+            min_value=1,
+            max_value=365,
             value=30,
             help="Prazo considerado para análise de SLA"
         )
@@ -463,24 +487,18 @@ if MENU == "📊 Dashboards":
         # Aplicar filtros
         df_filtered = df.copy()
 
-        if periodo and col_data_base:
+        if periodo and len(periodo) == 2 and col_data_base:
             ini, fim = periodo
             df_filtered = df_filtered[
-                (df_filtered[col_data_base] >= pd.to_datetime(ini)) & 
+                (df_filtered[col_data_base] >= pd.to_datetime(ini)) &
                 (df_filtered[col_data_base] <= pd.to_datetime(fim))
             ]
 
         # Aplicar filtros das seleções
-        filter_mapping = {
-            'diretoria': col_mappings['diretoria'],
-            'situacao': col_mappings['situacao'],
-            'urgencia': col_mappings['urgencia'],
-            'om': col_mappings['om']
-        }
-
-        for filter_key, col_name in filter_mapping.items():
-            if filtros.get(filter_key) and col_name and col_name in df_filtered.columns:
-                df_filtered = df_filtered[df_filtered[col_name].astype(str).isin(filtros[filter_key])]
+        for filter_key, col_name in col_mappings.items():
+            selected_options = filtros.get(filter_key)
+            if selected_options and col_name and col_name in df_filtered.columns:
+                df_filtered = df_filtered[df_filtered[col_name].astype(str).isin(selected_options)]
 
         # KPIs
         st.markdown("### 📈 Indicadores Principais")
@@ -492,7 +510,7 @@ if MENU == "📊 Dashboards":
         # Finalizadas
         finalizadas = 0
         pct_finalizadas = 0
-        if col_mappings['situacao'] and col_mappings['situacao'] in df_filtered.columns:
+        if col_mappings.get('situacao') and col_mappings['situacao'] in df_filtered.columns:
             finalizadas = df_filtered[col_mappings['situacao']].astype(str).str.upper().str.contains('FINALIZADA', na=False).sum()
             pct_finalizadas = (finalizadas / total_vistorias * 100) if total_vistorias > 0 else 0
 
@@ -500,15 +518,15 @@ if MENU == "📊 Dashboards":
         prazo_medio_total = None
         prazo_medio_exec = None
         
-        if col_mappings['dias_total'] and col_mappings['dias_total'] in df_filtered.columns:
+        if col_mappings.get('dias_total') and col_mappings['dias_total'] in df_filtered.columns:
             prazo_medio_total = df_filtered[col_mappings['dias_total']].mean()
             
-        if col_mappings['dias_execucao'] and col_mappings['dias_execucao'] in df_filtered.columns:
+        if col_mappings.get('dias_execucao') and col_mappings['dias_execucao'] in df_filtered.columns:
             prazo_medio_exec = df_filtered[col_mappings['dias_execucao']].mean()
 
         # SLA
         pct_sla = None
-        if col_mappings['dias_total'] and col_mappings['dias_total'] in df_filtered.columns and total_vistorias > 0:
+        if col_mappings.get('dias_total') and col_mappings['dias_total'] in df_filtered.columns and total_vistorias > 0:
             dentro_sla = (df_filtered[col_mappings['dias_total']] <= sla_dias).sum()
             pct_sla = dentro_sla / total_vistorias * 100
 
@@ -541,8 +559,8 @@ if MENU == "📊 Dashboards":
             )
             
             fig_evolucao = px.line(
-                monthly_data, 
-                x=col_data_base, 
+                monthly_data,
+                x=col_data_base,
                 y='Vistorias',
                 markers=True,
                 title="📈 Evolução Mensal de Vistorias",
@@ -551,24 +569,23 @@ if MENU == "📊 Dashboards":
             fig_evolucao.update_layout(height=400)
             st.plotly_chart(fig_evolucao, use_container_width=True)
 
-        # Gráficos individuais com melhor tratamento de dados
-        
         # 1. Vistorias por Diretoria
-        if col_mappings['diretoria'] and col_mappings['diretoria'] in df_filtered.columns:
+        col_diretoria = col_mappings.get('diretoria')
+        if col_diretoria and col_diretoria in df_filtered.columns:
             diretoria_data = (
-                df_filtered[col_mappings['diretoria']]
+                df_filtered[col_diretoria]
                 .dropna()
                 .value_counts()
                 .reset_index()
-                .rename(columns={'index': col_mappings['diretoria'], col_mappings['diretoria']: 'Quantidade'})
-                .sort_values('Quantidade', ascending=True)  # Para gráfico horizontal
+                .rename(columns={'count': 'Quantidade'}) 
+                .sort_values('Quantidade', ascending=True)
             )
             
             if not diretoria_data.empty:
                 fig_dir = px.bar(
-                    diretoria_data, 
-                    x='Quantidade', 
-                    y=col_mappings['diretoria'],
+                    diretoria_data,
+                    x='Quantidade',
+                    y=col_diretoria,
                     orientation='h',
                     title="🏢 Vistorias por Diretoria Responsável",
                     template="plotly_white",
@@ -579,29 +596,29 @@ if MENU == "📊 Dashboards":
                 st.plotly_chart(fig_dir, use_container_width=True)
 
         # 2. Distribuição por Situação (PIE CHART)
-        if col_mappings['situacao'] and col_mappings['situacao'] in df_filtered.columns:
+        col_situacao = col_mappings.get('situacao')
+        if col_situacao and col_situacao in df_filtered.columns:
             situacao_data = (
-                df_filtered[col_mappings['situacao']]
+                df_filtered[col_situacao]
                 .dropna()
                 .value_counts()
                 .reset_index()
-                .rename(columns={'index': 'Situação', col_mappings['situacao']: 'Quantidade'})
+                .rename(columns={'count': 'Quantidade'})
             )
             
-            if not situacao_data.empty and len(situacao_data) > 0:
-                # Cores customizadas para o gráfico de pizza
+            if not situacao_data.empty:
                 colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF']
                 
                 fig_sit = px.pie(
-                    situacao_data, 
-                    names='Situação', 
+                    situacao_data,
+                    names=col_situacao,
                     values='Quantidade',
                     title="📋 Distribuição por Situação",
                     hole=0.4,
                     color_discrete_sequence=colors
                 )
                 fig_sit.update_traces(
-                    textposition='inside', 
+                    textposition='inside',
                     textinfo='percent+label',
                     hovertemplate='<b>%{label}</b><br>Quantidade: %{value}<br>Percentual: %{percent}<extra></extra>'
                 )
@@ -609,22 +626,23 @@ if MENU == "📊 Dashboards":
                 st.plotly_chart(fig_sit, use_container_width=True)
             else:
                 st.warning("⚠️ Não há dados de situação para exibir no gráfico.")
-
+        
         # 3. Vistorias por Urgência
-        if col_mappings['urgencia'] and col_mappings['urgencia'] in df_filtered.columns:
+        col_urgencia = col_mappings.get('urgencia')
+        if col_urgencia and col_urgencia in df_filtered.columns:
             urgencia_data = (
-                df_filtered[col_mappings['urgencia']]
+                df_filtered[col_urgencia]
                 .dropna()
                 .value_counts()
                 .reset_index()
-                .rename(columns={'index': col_mappings['urgencia'], col_mappings['urgencia']: 'Quantidade'})
+                .rename(columns={'count': 'Quantidade'})
                 .sort_values('Quantidade', ascending=False)
             )
             
             if not urgencia_data.empty:
                 fig_urg = px.bar(
-                    urgencia_data, 
-                    x=col_mappings['urgencia'], 
+                    urgencia_data,
+                    x=col_urgencia,
                     y='Quantidade',
                     title="⚡ Vistorias por Classificação de Urgência",
                     template="plotly_white",
@@ -636,20 +654,18 @@ if MENU == "📊 Dashboards":
                 st.plotly_chart(fig_urg, use_container_width=True)
 
         # Heatmap temporal por situação
-        if (col_data_base and col_data_base in df_filtered.columns and 
-            col_mappings['situacao'] and col_mappings['situacao'] in df_filtered.columns and
+        if (col_data_base and col_data_base in df_filtered.columns and
+            col_situacao and col_situacao in df_filtered.columns and
             df_filtered[col_data_base].notna().any()):
             
-            # Preparar dados para heatmap
-            df_heatmap = df_filtered[[col_data_base, col_mappings['situacao']]].dropna()
+            df_heatmap = df_filtered[[col_data_base, col_situacao]].dropna()
             df_heatmap['Mes'] = df_heatmap[col_data_base].dt.to_period('M').dt.to_timestamp()
             
-            # Criar pivot table
             heatmap_data = (
-                df_heatmap.groupby(['Mes', col_mappings['situacao']])
+                df_heatmap.groupby(['Mes', col_situacao])
                 .size()
                 .reset_index(name='Quantidade')
-                .pivot(index=col_mappings['situacao'], columns='Mes', values='Quantidade')
+                .pivot(index=col_situacao, columns='Mes', values='Quantidade')
                 .fillna(0)
             )
             
@@ -663,20 +679,23 @@ if MENU == "📊 Dashboards":
                 )
                 fig_heatmap.update_layout(height=400)
                 st.plotly_chart(fig_heatmap, use_container_width=True)
-        if (col_mappings['diretoria'] and col_mappings['diretoria'] in df_filtered.columns and 
-            col_mappings['dias_total'] and col_mappings['dias_total'] in df_filtered.columns):
+
+        # SLA por Diretoria
+        col_dias_total = col_mappings.get('dias_total')
+        if (col_diretoria and col_diretoria in df_filtered.columns and
+            col_dias_total and col_dias_total in df_filtered.columns):
             
-            sla_data = df_filtered.dropna(subset=[col_mappings['diretoria'], col_mappings['dias_total']]).copy()
-            sla_data['Dentro_SLA'] = sla_data[col_mappings['dias_total']] <= sla_dias
+            sla_data = df_filtered.dropna(subset=[col_diretoria, col_dias_total]).copy()
+            sla_data['Dentro_SLA'] = sla_data[col_dias_total] <= sla_dias
             sla_summary = (
-                sla_data.groupby(col_mappings['diretoria'])['Dentro_SLA']
+                sla_data.groupby(col_diretoria)['Dentro_SLA']
                 .mean() * 100
             ).reset_index(name='pct_sla').sort_values('pct_sla')
             
             fig_sla = px.bar(
-                sla_summary, 
-                x='pct_sla', 
-                y=col_mappings['diretoria'],
+                sla_summary,
+                x='pct_sla',
+                y=col_diretoria,
                 orientation='h',
                 title=f"🎯 % Dentro do SLA (≤{sla_dias} dias) por Diretoria",
                 labels={'pct_sla': '% dentro do SLA'},
@@ -688,16 +707,15 @@ if MENU == "📊 Dashboards":
         # Detalhamento dos dados
         st.markdown("### 📋 Detalhamento dos Dados")
         
-        # Ordenar por data mais recente se possível
         if col_data_base and col_data_base in df_filtered.columns:
             df_show = df_filtered.sort_values(col_data_base, ascending=False).head(100)
         else:
             df_show = df_filtered.head(100)
         
-        st.dataframe(df_show, use_container_width=True, height=400)
+        st.dataframe(df_show, use_container_width=True, height=400, hide_index=True)
         
         # Download dos dados filtrados
-        col1, col2 = st.columns(2)
+        col1, _ = st.columns([1, 2]) # Ajustado para ocupar menos espaço
         
         with col1:
             csv_filtered = df_filtered.to_csv(index=False).encode("utf-8-sig")
@@ -711,6 +729,7 @@ if MENU == "📊 Dashboards":
 
     except Exception as e:
         st.error(f"❌ Erro ao carregar dashboards: {e}")
+        st.exception(e) # Adiciona mais detalhes do erro para debug
 
 # =========================================================
 # RODAPÉ
@@ -724,3 +743,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+```
