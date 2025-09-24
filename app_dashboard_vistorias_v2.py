@@ -63,7 +63,7 @@ def _book():
 def _ensure_ws_with_header(sheet, title: str, header: list[str]):
 
     # ===== Leituras/gravações tolerantes a cabeçalho “bagunçado” =====
-import pandas as pd
+
 
 def _make_unique_headers(raw_headers):
     """Gera nomes únicos: vazio -> col_1; duplicados -> nome_2, nome_3, ..."""
