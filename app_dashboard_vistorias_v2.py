@@ -371,72 +371,86 @@ if MENU == "📊 Dashboards":
                 mapped_cols = {k: v for k, v in col_mappings.items() if v is not None}
                 st.write(mapped_cols if mapped_cols else "Nenhuma coluna mapeada automaticamente")
 
-        # Mapeamento de colunas
-        col_mappings = {
-            'objeto': find_column(df, ["OBJETO DE VISTORIA", "OBJETO"]),
-            'om': find_column(df, ["OM APOIADA", "OM APOIADORA", "OM"]),
-            'diretoria': find_column(df, ["Diretoria Responsavel", "Diretoria Responsável", "Diretoria"]),
-            'urgencia': find_column(df, ["Classificacao da Urgencia", "Classificação da Urgência", "Urgencia"]),
-            'situacao': find_column(df, ["Situacao", "Situação"]),
-            'data_solicitacao': find_column(df, ["DATA DA SOLICITACAO", "DATA DA SOLICITAÇÃO"]),
-            'data_vistoria': find_column(df, ["DATA DA VISTORIA"]),
-            'dias_total': find_column(df, ["QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO"]),
-            'dias_execucao': find_column(df, ["QUANTIDADE DE DIAS PARA EXECUCAO", "QUANTIDADE DE DIAS PARA EXECUÇÃO"]),
-            'status': find_column(df, ["STATUS - ATUALIZACAO SEMANAL", "Status"])
-        }
+        try:
+            # Mapeamento inteligente de colunas baseado nos nomes encontrados
+            col_mappings = {
+                'objeto': find_column(df, ["OBJETO DE VISTORIA", "OBJETO"]),
+                'om': find_column(df, ["OM APOIADA", "OM APOIADORA", "OM"]),
+                'diretoria': find_column(df, ["Diretoria Responsavel", "Diretoria Responsável", "Diretoria Responsavel"]),
+                'urgencia': find_column(df, ["Classificacao da Urgencia", "Classificação da Urgência", "Classificação de Urgência", "Urgencia"]),
+                'situacao': find_column(df, ["Situacao", "Situação"]),
+                'data_solicitacao': find_column(df, ["DATA DA SOLICITACAO", "DATA DA SOLICITAÇÃO"]),
+                'data_vistoria': find_column(df, ["DATA DA VISTORIA"]),
+                'dias_total': find_column(df, ["QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO"]),
+                'dias_execucao': find_column(df, ["QUANTIDADE DE DIAS PARA EXECUCAO", "QUANTIDADE DE DIAS PARA EXECUÇÃO"]),
+                'status': find_column(df, ["STATUS - ATUALIZACAO SEMANAL", "STATUS - ATUALIZAÇÃO SEMANAL", "Status", "VT EXECUTADA POR"])
+            }
+            
+            # Garantir que col_mappings seja sempre um dicionário válido
+            if not isinstance(col_mappings, dict):
+                col_mappings = {}
+        
+        except Exception as e:
+            st.error(f"❌ Erro no mapeamento de colunas: {e}")
+            col_mappings = {}
+            st.info("🔄 Usando mapeamento manual de colunas. Por favor, verifique os nomes das colunas.")
 
-        # Conversão de tipos
-        for col in [col_mappings['data_solicitacao'], col_mappings['data_vistoria']]:
-            if col and col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
+        # Conversão segura de tipos de dados
+        try:
+            # Conversão de datas
+            date_columns = [col_mappings.get('data_solicitacao'), col_mappings.get('data_vistoria')]
+            for col in date_columns:
+                if col and col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors="coerce")
 
-        for col in [col_mappings['dias_total'], col_mappings['dias_execucao']]:
-            if col and col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+            # Conversão de números
+            numeric_columns = [col_mappings.get('dias_total'), col_mappings.get('dias_execucao')]
+            for col in numeric_columns:
+                if col and col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+        
+        except Exception as e:
+            st.warning(f"⚠️ Aviso na conversão de dados: {e}")
 
-        # Sidebar com filtros
+        # Sidebar com filtros (com verificações de segurança)
         st.sidebar.markdown("### 🔍 Filtros")
         
         # Filtro de período
-        col_data_base = col_mappings['data_solicitacao'] if col_mappings['data_solicitacao'] else col_mappings['data_vistoria']
+        col_data_base = col_mappings.get('data_solicitacao') or col_mappings.get('data_vistoria')
         periodo = None
         
         if col_data_base and col_data_base in df.columns and df[col_data_base].notna().any():
-            min_dt = pd.to_datetime(df[col_data_base].min()).date()
-            max_dt = pd.to_datetime(df[col_data_base].max()).date()
-            periodo = st.sidebar.date_input(
-                "📅 Período",
-                value=(min_dt, max_dt),
-                min_value=min_dt,
-                max_value=max_dt
-            )
+            try:
+                min_dt = pd.to_datetime(df[col_data_base].min()).date()
+                max_dt = pd.to_datetime(df[col_data_base].max()).date()
+                periodo = st.sidebar.date_input(
+                    "📅 Período",
+                    value=(min_dt, max_dt),
+                    min_value=min_dt,
+                    max_value=max_dt
+                )
+            except Exception as e:
+                st.sidebar.warning(f"⚠️ Erro no filtro de data: {e}")
 
-        # Outros filtros
+        # Outros filtros com verificação de existência
         filtros = {}
         
-        if col_mappings['diretoria'] and col_mappings['diretoria'] in df.columns:
-            filtros['diretoria'] = st.sidebar.multiselect(
-                "🏢 Diretoria Responsável", 
-                get_filter_options(df[col_mappings['diretoria']])
-            )
-
-        if col_mappings['situacao'] and col_mappings['situacao'] in df.columns:
-            filtros['situacao'] = st.sidebar.multiselect(
-                "📋 Situação", 
-                get_filter_options(df[col_mappings['situacao']])
-            )
-
-        if col_mappings['urgencia'] and col_mappings['urgencia'] in df.columns:
-            filtros['urgencia'] = st.sidebar.multiselect(
-                "⚡ Urgência", 
-                get_filter_options(df[col_mappings['urgencia']])
-            )
-
-        if col_mappings['om'] and col_mappings['om'] in df.columns:
-            filtros['om'] = st.sidebar.multiselect(
-                "🏛️ OM Apoiadora", 
-                get_filter_options(df[col_mappings['om']])
-            )
+        filter_configs = [
+            ('diretoria', "🏢 Diretoria Responsável"),
+            ('situacao', "📋 Situação"),
+            ('urgencia', "⚡ Urgência"),
+            ('om', "🏛️ OM Apoiadora")
+        ]
+        
+        for key, label in filter_configs:
+            col_name = col_mappings.get(key)
+            if col_name and col_name in df.columns:
+                try:
+                    options = get_filter_options(df[col_name])
+                    if options:  # Só adiciona o filtro se houver opções
+                        filtros[key] = st.sidebar.multiselect(label, options)
+                except Exception as e:
+                    st.sidebar.warning(f"⚠️ Erro no filtro {label}: {e}")
 
         sla_dias = st.sidebar.number_input(
             "⏱️ SLA (dias)", 
