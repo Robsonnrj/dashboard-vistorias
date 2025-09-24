@@ -359,6 +359,17 @@ if MENU == "📊 Dashboards":
             st.stop()
         
         st.info(f"📊 Analisando **{base_tab}** • **{len(df):,}** registros")
+        
+        # Debug: Mostrar informações sobre as colunas encontradas
+        with st.expander("🔍 Debug - Colunas Mapeadas", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Colunas disponíveis:**")
+                st.write(list(df.columns))
+            with col2:
+                st.write("**Mapeamento encontrado:**")
+                mapped_cols = {k: v for k, v in col_mappings.items() if v is not None}
+                st.write(mapped_cols if mapped_cols else "Nenhuma coluna mapeada automaticamente")
 
         # Mapeamento de colunas
         col_mappings = {
@@ -526,26 +537,118 @@ if MENU == "📊 Dashboards":
             fig_evolucao.update_layout(height=400)
             st.plotly_chart(fig_evolucao, use_container_width=True)
 
-        # Gráficos por categoria
-        chart_configs = [
-            (col_mappings['diretoria'], "🏢 Vistorias por Diretoria", "bar"),
-            (col_mappings['situacao'], "📋 Distribuição por Situação", "pie"),
-            (col_mappings['urgencia'], "⚡ Vistorias por Urgência", "bar"),
-        ]
+        # Gráficos individuais com melhor tratamento de dados
+        
+        # 1. Vistorias por Diretoria
+        if col_mappings['diretoria'] and col_mappings['diretoria'] in df_filtered.columns:
+            diretoria_data = (
+                df_filtered[col_mappings['diretoria']]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'index': col_mappings['diretoria'], col_mappings['diretoria']: 'Quantidade'})
+                .sort_values('Quantidade', ascending=True)  # Para gráfico horizontal
+            )
+            
+            if not diretoria_data.empty:
+                fig_dir = px.bar(
+                    diretoria_data, 
+                    x='Quantidade', 
+                    y=col_mappings['diretoria'],
+                    orientation='h',
+                    title="🏢 Vistorias por Diretoria Responsável",
+                    template="plotly_white",
+                    color='Quantidade',
+                    color_continuous_scale='Blues'
+                )
+                fig_dir.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig_dir, use_container_width=True)
 
-        for col_name, title, chart_type in chart_configs:
-            if col_name and col_name in df_filtered.columns:
-                chart_data = df_filtered.groupby(col_name, as_index=False).size().sort_values('size', ascending=False)
+        # 2. Distribuição por Situação (PIE CHART)
+        if col_mappings['situacao'] and col_mappings['situacao'] in df_filtered.columns:
+            situacao_data = (
+                df_filtered[col_mappings['situacao']]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'index': 'Situação', col_mappings['situacao']: 'Quantidade'})
+            )
+            
+            if not situacao_data.empty and len(situacao_data) > 0:
+                # Cores customizadas para o gráfico de pizza
+                colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF']
                 
-                if chart_type == "bar":
-                    fig = px.bar(chart_data, x=col_name, y='size', title=title, template="plotly_white")
-                elif chart_type == "pie":
-                    fig = px.pie(chart_data, names=col_name, values='size', title=title, hole=0.4)
-                
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                fig_sit = px.pie(
+                    situacao_data, 
+                    names='Situação', 
+                    values='Quantidade',
+                    title="📋 Distribuição por Situação",
+                    hole=0.4,
+                    color_discrete_sequence=colors
+                )
+                fig_sit.update_traces(
+                    textposition='inside', 
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Quantidade: %{value}<br>Percentual: %{percent}<extra></extra>'
+                )
+                fig_sit.update_layout(height=400)
+                st.plotly_chart(fig_sit, use_container_width=True)
+            else:
+                st.warning("⚠️ Não há dados de situação para exibir no gráfico.")
 
-        # Análise de SLA por Diretoria
+        # 3. Vistorias por Urgência
+        if col_mappings['urgencia'] and col_mappings['urgencia'] in df_filtered.columns:
+            urgencia_data = (
+                df_filtered[col_mappings['urgencia']]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'index': col_mappings['urgencia'], col_mappings['urgencia']: 'Quantidade'})
+                .sort_values('Quantidade', ascending=False)
+            )
+            
+            if not urgencia_data.empty:
+                fig_urg = px.bar(
+                    urgencia_data, 
+                    x=col_mappings['urgencia'], 
+                    y='Quantidade',
+                    title="⚡ Vistorias por Classificação de Urgência",
+                    template="plotly_white",
+                    color='Quantidade',
+                    color_continuous_scale='Reds'
+                )
+                fig_urg.update_layout(height=400, showlegend=False)
+                fig_urg.update_xaxes(tickangle=45)
+                st.plotly_chart(fig_urg, use_container_width=True)
+
+        # Heatmap temporal por situação
+        if (col_data_base and col_data_base in df_filtered.columns and 
+            col_mappings['situacao'] and col_mappings['situacao'] in df_filtered.columns and
+            df_filtered[col_data_base].notna().any()):
+            
+            # Preparar dados para heatmap
+            df_heatmap = df_filtered[[col_data_base, col_mappings['situacao']]].dropna()
+            df_heatmap['Mes'] = df_heatmap[col_data_base].dt.to_period('M').dt.to_timestamp()
+            
+            # Criar pivot table
+            heatmap_data = (
+                df_heatmap.groupby(['Mes', col_mappings['situacao']])
+                .size()
+                .reset_index(name='Quantidade')
+                .pivot(index=col_mappings['situacao'], columns='Mes', values='Quantidade')
+                .fillna(0)
+            )
+            
+            if not heatmap_data.empty and heatmap_data.shape[0] > 0 and heatmap_data.shape[1] > 0:
+                fig_heatmap = px.imshow(
+                    heatmap_data,
+                    aspect="auto",
+                    title="🔥 Heatmap - Situação por Mês",
+                    labels=dict(x="Mês", y="Situação", color="Quantidade"),
+                    color_continuous_scale="YlOrRd"
+                )
+                fig_heatmap.update_layout(height=400)
+                st.plotly_chart(fig_heatmap, use_container_width=True)
         if (col_mappings['diretoria'] and col_mappings['diretoria'] in df_filtered.columns and 
             col_mappings['dias_total'] and col_mappings['dias_total'] in df_filtered.columns):
             
