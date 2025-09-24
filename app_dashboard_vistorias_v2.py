@@ -77,7 +77,7 @@ def _ensure_ws_with_header(sheet, title: str, header: list[str]):
 def read_tab_df(tab_name: str) -> pd.DataFrame:
     """Lê uma aba do Sheets como DataFrame (infere header da linha 1)."""
     ws = _book().worksheet(tab_name)
-    data = ws.get_all_records()
+    data = read_ws_loose(ws)
     df = pd.DataFrame(data)
     # normaliza datas
     for c in df.columns:
@@ -249,7 +249,51 @@ if MENU == "📊 Dashboards":
     if df.empty:
         st.warning("A aba está vazia.")
         st.stop()
+def _make_unique_headers(raw_headers):
+    """Gera nomes únicos: vazio -> col_1, duplicado -> nome_2, nome_3, ..."""
+    out, seen = [], {}
+    for j, h in enumerate(raw_headers, start=1):
+        h = (h or "").strip()
+        if not h:
+            h = f"col_{j}"
+        base = h
+        if base in seen:
+            seen[base] += 1
+            h = f"{base}_{seen[base]}"
+        else:
+            seen[base] = 1
+        out.append(h)
+    return out
 
+def read_ws_loose(ws, header_row=None) -> pd.DataFrame:
+    """
+    Lê a worksheet tolerando cabeçalho repetido/mesclado/vazio.
+    - Se header_row não for dado, usa a primeira linha que tenha algum conteúdo.
+    - Garante nomes únicos para as colunas.
+    """
+    values = ws.get_all_values()  # lista de listas
+    if not values:
+        return pd.DataFrame()
+
+    # acha a linha do cabeçalho
+    if header_row is None:
+        hdr_idx = next(
+            (i for i, row in enumerate(values) if any(str(c).strip() for c in row)),
+            0
+        )
+    else:
+        hdr_idx = max(0, int(header_row) - 1)
+
+    headers = _make_unique_headers(values[hdr_idx])
+    body = values[hdr_idx + 1 :]
+    # corta linhas completamente vazias no fim (opcional)
+    while body and not any(str(c).strip() for c in body[-1]):
+        body.pop()
+
+    df = pd.DataFrame(body, columns=headers)
+    # troca strings vazias por NA (opcional)
+    df = df.replace("", pd.NA)
+    return df
     # --------- Mapeamento tolerante de colunas ---------
     c_obj = col_or_none(df, ["OBJETO DE VISTORIA", "OBJETO"])
     c_om  = col_or_none(df, ["OM APOIADA", "OM APOIADORA", "OM"])
