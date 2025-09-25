@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-# CRO1 — Dashboard & Editor (Google Sheets) | Dark UI inspirado nos mockups
+# CRO1 — Dashboard & Editor (Google Sheets) | Tema claro
 
 import warnings
 warnings.filterwarnings("ignore")
 
-from datetime import datetime, date
+from datetime import datetime
 import unicodedata
 
 import pandas as pd
@@ -23,41 +23,30 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# =============== ESTILO (CSS) ===============
-DARK_CSS = """
+# =============== ESTILO (CSS LIGHT) ===============
+LIGHT_CSS = """
 <style>
-/* containers */
-.block-container { padding-top: 1.2rem; max-width: 1400px; }
-[data-testid="stSidebar"] { background: #0b1220; border-right: 1px solid #0e172a; }
-section.main { background: #0a0f1c; }
+.block-container { padding-top: 1.1rem; max-width: 1400px; }
+[data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e5e7eb; }
+section.main { background: #ffffff; }
 
-/* cards */
 .card {
-  background: linear-gradient(180deg,#0f172a 0%, #0b1220 100%);
-  border: 1px solid #111827; border-radius: 16px; padding: 16px;
-  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.05);
 }
-.card-title { font-weight: 700; font-size: 0.95rem; color: #a7b0c3; letter-spacing:.4px; }
-.kpi { font-size: 2rem; font-weight: 800; color: #e5e7eb; }
-.kpi-sub { color: #9ca3af; font-size: .85rem; margin-top: .25rem; }
+.card-title { font-weight: 700; font-size: .95rem; color: #4b5563; letter-spacing: .2px; }
+.kpi { font-size: 2rem; font-weight: 800; color: #111827; }
+.kpi-sub { color: #6b7280; font-size: .85rem; margin-top: .25rem; }
 
-/* buttons */
-.stButton>button {
-  border-radius: 12px !important; padding: 10px 14px;
-  border: 1px solid #1f2937; background: #122032;
+.stButton>button { border-radius: 10px !important; padding: 9px 12px; }
+.badge {
+  display:inline-block; padding: 2px 10px; border-radius: 999px; font-size: .75rem;
+  border:1px solid #e5e7eb; background:#f8fafc; color:#111827; margin-right:6px;
 }
-.stButton>button:hover { filter: brightness(1.12); }
-
-/* table */
-tbody tr:hover { background: rgba(34,197,94,.06) !important; }
-
-/* badges simples */
-.badge { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem;
-  border:1px solid #233048; background:#0e1a2d; color:#c7d2fe; margin-right:6px;
-}
+tbody tr:hover { background: #f9fafb !important; }
 </style>
 """
-st.markdown(DARK_CSS, unsafe_allow_html=True)
+st.markdown(LIGHT_CSS, unsafe_allow_html=True)
 
 # =============== FUNÇÕES BASE (Sheets/cache) ===============
 def has_gsheets() -> bool:
@@ -100,62 +89,49 @@ def _make_unique_headers(row):
 
 def _read_ws_loose(ws) -> pd.DataFrame:
     values = ws.get_all_values()
-    if not values: 
+    if not values:
         return pd.DataFrame()
-    # pega 1ª linha não totalmente vazia como cabeçalho
     hdr_idx = next((i for i,row in enumerate(values) if any(str(c).strip() for c in row)), 0)
     hdr = _make_unique_headers(values[hdr_idx])
     body = values[hdr_idx+1:]
     while body and not any(str(c).strip() for c in body[-1]):
         body.pop()
     df = pd.DataFrame(body, columns=hdr).replace("", pd.NA)
+    # normalizações úteis
+    for c in df.columns:
+        up = c.upper()
+        if "DATA" in up:
+            df[c] = pd.to_datetime(df[c], errors="coerce")
+        if "DIAS" in up or "QUANTIDADE" in up:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
 @st.cache_data(ttl=120, show_spinner=False)
 def read_tab_df(tab_name: str) -> pd.DataFrame:
     ws = _book().worksheet(tab_name)
-    df = _read_ws_loose(ws)
-    # normalizações úteis
-    for c in df.columns:
-        if "DATA" in c.upper():
-            df[c] = pd.to_datetime(df[c], errors="coerce")
-        if "QUANTIDADE" in c.upper() or "DIAS" in c.upper():
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
+    return _read_ws_loose(ws)
 
 # --------- OMs (Validacao_de_Dados) com cache de 5 min ---------
 @st.cache_data(ttl=300, show_spinner=False)
 def load_oms_from_validation() -> pd.DataFrame:
     """
-    Lê a aba 'Validacao_de_Dados' e retorna DF com colunas:
-    ['sigla','nome','diretoria'] (limpas/únicas)
+    Retorna DF com ['sigla','nome','diretoria'] a partir da aba 'Validacao_de_Dados'.
     """
     try:
         df = read_tab_df("Validacao_de_Dados")
     except Exception:
         return pd.DataFrame(columns=["sigla","nome","diretoria"])
 
-    # tenta detectar colunas por nome aproximado
-    col_sigla  = next((c for c in df.columns if _norm(c) in ("om","sigla")), None)
-    col_nome   = next((c for c in df.columns if "organizacao" in _norm(c) or "nome" in _norm(c)), None)
-    col_dir    = next((c for c in df.columns if "diretoria" in _norm(c)), None)
-
-    if not col_sigla:  # fallback: coluna 'N' (Sigla) em algumas versões
-        for c in df.columns:
-            if c.strip().upper().startswith("N"):
-                col_sigla = c; break
+    col_sigla = next((c for c in df.columns if _norm(c) in ("om","sigla")), None)
+    col_nome  = next((c for c in df.columns if "organizacao" in _norm(c) or "nome" in _norm(c)), None)
+    col_dir   = next((c for c in df.columns if "diretoria" in _norm(c)), None)
 
     data = pd.DataFrame(columns=["sigla","nome","diretoria"])
-    if col_sigla:
-        data["sigla"] = df[col_sigla].astype(str).str.strip()
-    if col_nome:
-        data["nome"] = df[col_nome].astype(str).str.strip()
-    if col_dir:
-        data["diretoria"] = df[col_dir].astype(str).str.strip()
+    if col_sigla: data["sigla"] = df[col_sigla].astype(str).str.strip()
+    if col_nome:  data["nome"]  = df[col_nome].astype(str).str.strip()
+    if col_dir:   data["diretoria"] = df[col_dir].astype(str).str.strip()
 
-    # limpa
     data = data.dropna(subset=["sigla"]).drop_duplicates(subset=["sigla"])
-    # se faltar nome/diretoria, preenche vazio
     for c in ["nome","diretoria"]:
         if c not in data.columns: data[c] = ""
     return data[["sigla","nome","diretoria"]]
@@ -169,7 +145,7 @@ with st.sidebar:
         read_tab_df.clear()
         load_oms_from_validation.clear()
         st.toast("Cache limpo. Recarregando…")
-        st.experimental_rerun()
+        st.rerun()  # <<==== CORRIGIDO (antes era experimental_rerun)
 
     MENU = option_menu(
         "",
@@ -177,22 +153,14 @@ with st.sidebar:
         icons=["bar-chart","table"],
         default_index=0,
         styles={
-            "nav-link": {"font-size":"15px", "text-align":"left", "margin":"2px", "--hover-color":"#0b1220"},
-            "nav-link-selected": {"background-color":"#122032"},
+            "nav-link": {"font-size":"15px", "text-align":"left", "margin":"2px"},
+            "nav-link-selected": {"background-color":"#f3f4f6"},
         }
     )
 
-# =============== FILTROS HIERÁRQUICOS (Diretoria → OM) ===============
+# =============== FILTROS HIERÁRQUICOS ===============
 def render_filters(df_base: pd.DataFrame):
-    """
-    Monta filtros com base no DF principal (ex.: ACOMPANHAMENTO VISTORIAS)
-    e na aba Validacao_de_Dados (para Diretoria→OM).
-    Retorna dict com filtros aplicados.
-    """
-    oms_val = load_oms_from_validation()
-    has_val = not oms_val.empty
-
-    # Detecta colunas do DF base
+    # detectar colunas
     cols = list(df_base.columns)
     def pick(*cands):
         for x in cands:
@@ -211,11 +179,11 @@ def render_filters(df_base: pd.DataFrame):
     c_obj = pick("OBJETO DE VISTORIA","OBJETO")
     c_dtS = pick("DATA DA SOLICITAÇÃO","DATA DA SOLICITACAO")
     c_dtV = pick("DATA DA VISTORIA")
+    base_date_col = c_dtS or c_dtV
 
-    # período
+    # Período
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">Período</div>', unsafe_allow_html=True)
-    base_date_col = c_dtS or c_dtV
     periodo = None
     if base_date_col and df_base[base_date_col].notna().any():
         dmin = pd.to_datetime(df_base[base_date_col]).min().date()
@@ -223,41 +191,35 @@ def render_filters(df_base: pd.DataFrame):
         periodo = st.date_input("Intervalo", (dmin, dmax))
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Diretoria → OM
+    # Diretoria -> OM (com validação)
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">Filtros por Estrutura</div>', unsafe_allow_html=True)
-    if has_val:
+    oms_val = load_oms_from_validation()
+    if not oms_val.empty:
         dirs = sorted([d for d in oms_val["diretoria"].dropna().unique().tolist() if d])
         dir_sel = st.selectbox("🏢 Diretoria Responsável", ["(Todas)"] + dirs, index=0)
-        # filtra OMs por diretoria selecionada
-        if dir_sel == "(Todas)":
-            om_pool = oms_val.copy()
-        else:
-            om_pool = oms_val[oms_val["diretoria"].astype(str) == dir_sel]
-        # label amigável: "SIGLA — Nome"
-        om_opts = (om_pool
+        pool = oms_val if dir_sel == "(Todas)" else oms_val[oms_val["diretoria"].astype(str)==dir_sel]
+        om_opts = (pool
                    .assign(label=lambda d: d["sigla"].fillna("") + " — " + d["nome"].fillna(""))
                    .sort_values("sigla"))
         lookup = dict(zip(om_opts["label"], om_opts["sigla"]))
-        om_sel_labels = st.multiselect("🏛️ OM Apoiadora (digite para buscar)", om_opts["label"].tolist())
-        om_sel_siglas = [lookup[x] for x in om_sel_labels]
+        om_labels = st.multiselect("🏛️ OM Apoiadora (digite para buscar)", om_opts["label"].tolist())
+        om_sel = [lookup[x] for x in om_labels]
     else:
-        # sem validação — fallback para OMs do DF base
-        st.info("Aba **Validacao_de_Dados** não encontrada ou vazia. Usando OMs do próprio dataset.")
-        om_list = sorted(df_base[c_om].dropna().astype(str).unique().tolist()) if c_om else []
-        om_sel_siglas = st.multiselect("🏛️ OM Apoiadora", om_list)
+        st.info("Aba **Validacao_de_Dados** ausente/vazia. Usando OMs do dataset.")
+        om_sel = sorted(df_base[c_om].dropna().astype(str).unique().tolist()) if c_om else []
+        om_sel = st.multiselect("🏛️ OM Apoiadora", om_sel)
 
-    # situação / urgência
     sit_sel = st.multiselect("📋 Situação", sorted(df_base[c_sit].dropna().astype(str).unique().tolist()) if c_sit else [])
     urg_sel = st.multiselect("⚡ Urgência", sorted(df_base[c_urg].dropna().astype(str).unique().tolist()) if c_urg else [])
-    # busca por objeto
-    txt = st.text_input("🔎 Buscar no objeto de vistoria", placeholder="Palavra-chave…")
+    q = st.text_input("🔎 Buscar no objeto de vistoria", placeholder="Palavra-chave…")
     st.markdown('</div>', unsafe_allow_html=True)
 
     return dict(
         periodo=periodo, base_date_col=base_date_col,
-        diretoria=(None if not has_val else dir_sel if 'dir_sel' in locals() else None),
-        oms=om_sel_siglas, c_dir=c_dir, c_om=c_om, c_sit=c_sit, c_urg=c_urg, c_obj=c_obj
+        diretoria=(dir_sel if 'dir_sel' in locals() else None),
+        oms=om_sel, c_dir=c_dir, c_om=c_om, c_sit=c_sit, c_urg=c_urg, c_obj=c_obj,
+        sit_sel=sit_sel, urg_sel=urg_sel, query=q
     )
 
 def apply_filters(df: pd.DataFrame, f: dict) -> pd.DataFrame:
@@ -267,22 +229,21 @@ def apply_filters(df: pd.DataFrame, f: dict) -> pd.DataFrame:
         ini, fim = f["periodo"]
         res = res[(pd.to_datetime(res[f["base_date_col"]]) >= pd.to_datetime(ini)) &
                   (pd.to_datetime(res[f["base_date_col"]]) <= pd.to_datetime(fim))]
+    # diretoria
+    if f.get("diretoria") and f["diretoria"] != "(Todas)" and f["c_dir"] in res.columns:
+        res = res[res[f["c_dir"]].astype(str) == f["diretoria"]]
     # OMs
     if f["oms"] and f["c_om"] in res.columns:
         res = res[res[f["c_om"]].astype(str).isin(f["oms"])]
     # Situação / Urgência
-    if f["c_sit"] in res.columns and 'sit_sel' in f and f['sit_sel']:
-        res = res[res[f["c_sit"]].astype(str).isin(f['sit_sel'])]
-    if f["c_urg"] in res.columns and 'urg_sel' in f and f['urg_sel']:
-        res = res[res[f["c_urg"]].astype(str).isin(f['urg_sel'])]
-    # Diretoria (apenas se vier da validação e existir no DF base)
-    if f.get("diretoria") and f["diretoria"] != "(Todas)" and f["c_dir"] in res.columns:
-        res = res[res[f["c_dir"]].astype(str) == f["diretoria"]]
-    # palavra-chave no objeto
-    if f.get("c_obj") in res.columns:
-        q = st.session_state.get("search_q","").strip().lower()
-        if q:
-            res = res[res[f["c_obj"]].astype(str).str.lower().str.contains(q)]
+    if f["sit_sel"] and f["c_sit"] in res.columns:
+        res = res[res[f["c_sit"]].astype(str).isin(f["sit_sel"])]
+    if f["urg_sel"] and f["c_urg"] in res.columns:
+        res = res[res[f["c_urg"]].astype(str).isin(f["urg_sel"])]
+    # Busca no objeto
+    if f["query"] and f["c_obj"] in res.columns:
+        q = f["query"].strip().lower()
+        res = res[res[f["c_obj"]].astype(str).str.lower().str.contains(q)]
     return res
 
 # =============== DASHBOARD ===============
@@ -307,11 +268,11 @@ def render_kpis(df: pd.DataFrame, fcols: dict):
     with col3:
         st.markdown('<div class="card"><div class="card-title">Prazo médio (total)</div>', unsafe_allow_html=True)
         val = f"{prazo_total:,.1f} dias" if prazo_total is not None else "—"
-        st.markdown(f'<div class="kpi">{val}</div><div class="kpi-sub">tempo até atendimento</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi">{val}</div><div class="kpi-sub">até atendimento</div></div>', unsafe_allow_html=True)
     with col4:
         st.markdown('<div class="card"><div class="card-title">Prazo médio (execução)</div>', unsafe_allow_html=True)
         val = f"{prazo_exec:,.1f} dias" if prazo_exec is not None else "—"
-        st.markdown(f'<div class="kpi">{val}</div><div class="kpi-sub">tempo de execução</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi">{val}</div><div class="kpi-sub">de execução</div></div>', unsafe_allow_html=True)
 
 def render_charts(df: pd.DataFrame, fcols: dict):
     c_dir  = fcols.get("c_dir")
@@ -379,7 +340,7 @@ def render_editor():
     with colB:
         if st.button("↻ Recarregar aba"):
             read_tab_df.clear()
-            st.experimental_rerun()
+            st.rerun()
 
     try:
         df_tab = read_tab_df(tab_name)
@@ -403,13 +364,12 @@ def render_editor():
 
 # =============== ROTEAMENTO ===============
 if MENU == "📊 Dashboard":
-    st.title("Sistema CRO1 — Gestão de Vistorias")
+    st.title("CRO1 — Dashboard de Vistorias")
 
     if not has_gsheets():
         st.warning("Configure o Google Sheets em `.streamlit/secrets.toml`.")
         st.stop()
 
-    # escolha da aba base (normalmente "ACOMPANHAMENTO VISTORIAS")
     sh = _book()
     all_tabs = [ws.title for ws in sh.worksheets()]
     base_tab = st.selectbox("Fonte do Dashboard (aba):", all_tabs, index=0)
@@ -425,13 +385,8 @@ if MENU == "📊 Dashboard":
         st.markdown("### Filtros")
         filters = render_filters(df_base)
 
-    # campo de busca global por objeto (mantém compatibilidade)
-    with st.sidebar:
-        st.session_state["search_q"] = st.text_input("Buscar no objeto (rápido)", key="q_global", placeholder="ex.: telhado, reforma…")
-
     df_f = apply_filters(df_base, filters)
 
-    # Badges básicos
     st.markdown(
         f'<span class="badge">Aba: {base_tab}</span>'
         f'<span class="badge">Registros: {len(df_f)}</span>',
