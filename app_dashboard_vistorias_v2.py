@@ -1,5 +1,4 @@
-
-# CRO1 — Editor + Dashboards (Google Sheets) - Versão Otimizada
+# CRO1 — Editor + Dashboards (Google Sheets) - Versão Otimizada com Filtro Dinâmico de OMs
 
 import warnings
 warnings.filterwarnings("ignore", message=".*outside the limits for dates.*", category=UserWarning, module="openpyxl")
@@ -14,7 +13,8 @@ import plotly.express as px
 import streamlit as st
 from google.oauth2.service_account import Credentials
 from streamlit_option_menu import option_menu
-import io  # <<< CORREÇÃO 2: Importado para o download de Excel
+import io
+import re
 
 # =========================================================
 # CONFIGURAÇÃO GERAL
@@ -125,6 +125,83 @@ def read_tab_df(tab_name: str) -> pd.DataFrame:
         st.error(f"Erro ao ler aba {tab_name}: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=300, show_spinner=False)  # Cache por 5 minutos
+def load_oms_validation_data() -> pd.DataFrame:
+    """Carrega dados de OMs da aba Validacao_de_Dados com cache de 5 minutos."""
+    try:
+        df_validation = read_tab_df("Validacao_de_Dados")
+        
+        if df_validation.empty:
+            st.warning("⚠️ Aba 'Validacao_de_Dados' não encontrada ou vazia")
+            return pd.DataFrame()
+        
+        # Mapeamento das colunas da validação
+        validation_mapping = {
+            'sigla': None,
+            'nome_completo': None,
+            'diretoria': None,
+            'orgao_setorial': None
+        }
+        
+        # Busca inteligente das colunas
+        for col in df_validation.columns:
+            col_upper = col.upper()
+            if 'OM' in col_upper and not validation_mapping['sigla']:
+                validation_mapping['sigla'] = col
+            elif 'ORGANIZAÇÃO MILITAR' in col_upper or 'ORGANIZACAO MILITAR' in col_upper:
+                validation_mapping['nome_completo'] = col
+            elif 'DIRETORIA RESPONSÁVEL' in col_upper or 'DIRETORIA RESPONSAVEL' in col_upper:
+                validation_mapping['diretoria'] = col
+            elif 'ÓRGÃOS DE DIREÇÃO' in col_upper or 'ORGAOS DE DIRECAO' in col_upper:
+                validation_mapping['orgao_setorial'] = col
+        
+        # Se não encontrou mapeamento automático, tenta por posição (B, C, D, M)
+        cols = list(df_validation.columns)
+        if not validation_mapping['sigla'] and len(cols) > 1:
+            validation_mapping['sigla'] = cols[1]  # Coluna B
+        if not validation_mapping['nome_completo'] and len(cols) > 2:
+            validation_mapping['nome_completo'] = cols[2]  # Coluna C
+        if not validation_mapping['diretoria'] and len(cols) > 3:
+            validation_mapping['diretoria'] = cols[3]  # Coluna D
+        if not validation_mapping['orgao_setorial'] and len(cols) > 12:
+            validation_mapping['orgao_setorial'] = cols[12]  # Coluna M
+        
+        # Constrói DataFrame limpo
+        oms_data = []
+        
+        for _, row in df_validation.iterrows():
+            sigla = str(row.get(validation_mapping['sigla'], '')).strip()
+            nome_completo = str(row.get(validation_mapping['nome_completo'], '')).strip()
+            diretoria = str(row.get(validation_mapping['diretoria'], '')).strip()
+            
+            # Pula linhas vazias ou inválidas
+            if not sigla or sigla == 'nan' or len(sigla) < 2:
+                continue
+                
+            # Cria entrada limpa
+            om_entry = {
+                'sigla': sigla,
+                'nome_completo': nome_completo if nome_completo != 'nan' else sigla,
+                'diretoria': diretoria if diretoria != 'nan' else 'Não Especificada',
+                'display_name': f"{sigla} - {nome_completo}" if nome_completo != 'nan' and nome_completo != sigla else sigla,
+                'search_text': f"{sigla} {nome_completo}".upper()
+            }
+            
+            oms_data.append(om_entry)
+        
+        df_oms = pd.DataFrame(oms_data)
+        
+        # Remove duplicatas baseado na sigla
+        if not df_oms.empty:
+            df_oms = df_oms.drop_duplicates(subset=['sigla'], keep='first')
+            df_oms = df_oms.sort_values(['diretoria', 'sigla'])
+        
+        return df_oms
+        
+    except Exception as e:
+        st.error(f"Erro ao carregar dados de OMs: {e}")
+        return pd.DataFrame()
+
 def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header=True):
     """Sobrescreve a aba com o DataFrame."""
     try:
@@ -203,6 +280,65 @@ def get_filter_options(series):
     except Exception:
         return sorted(list({str(x) for x in series.dropna().tolist()}))
 
+def create_om_filter_component(df_oms: pd.DataFrame, key_suffix: str = ""):
+    """Cria componente de filtro hierárquico de OMs."""
+    
+    if df_oms.empty:
+        st.sidebar.warning("⚠️ Lista de OMs não disponível")
+        return [], []
+    
+    # Filtro de Diretoria
+    diretorias_disponiveis = ['Todas'] + sorted(df_oms['diretoria'].unique().tolist())
+    diretoria_selecionada = st.sidebar.selectbox(
+        "🏢 Diretoria Responsável",
+        diretorias_disponiveis,
+        key=f"dir_filter_{key_suffix}"
+    )
+    
+    # Filtra OMs por diretoria
+    if diretoria_selecionada == 'Todas':
+        oms_filtradas = df_oms
+    else:
+        oms_filtradas = df_oms[df_oms['diretoria'] == diretoria_selecionada]
+    
+    # Campo de busca de OMs
+    search_term = st.sidebar.text_input(
+        "🔍 Buscar OM (sigla ou nome)",
+        key=f"om_search_{key_suffix}",
+        placeholder="Digite para buscar..."
+    )
+    
+    # Filtra por termo de busca
+    if search_term:
+        search_upper = search_term.upper()
+        mask = oms_filtradas['search_text'].str.contains(search_upper, na=False, regex=False)
+        oms_para_selecao = oms_filtradas[mask]
+    else:
+        oms_para_selecao = oms_filtradas
+    
+    # Multiselect de OMs
+    opcoes_om = oms_para_selecao['display_name'].tolist()
+    
+    if opcoes_om:
+        oms_selecionadas = st.sidebar.multiselect(
+            f"🏛️ OM Apoiadora ({len(opcoes_om)} encontradas)",
+            opcoes_om,
+            key=f"om_multi_{key_suffix}",
+            help=f"Selecionadas da {diretoria_selecionada}"
+        )
+        
+        # Converte nomes de display para siglas
+        siglas_selecionadas = []
+        if oms_selecionadas:
+            for om_display in oms_selecionadas:
+                sigla = oms_para_selecao[oms_para_selecao['display_name'] == om_display]['sigla'].iloc[0]
+                siglas_selecionadas.append(sigla)
+        
+        return siglas_selecionadas, [diretoria_selecionada] if diretoria_selecionada != 'Todas' else []
+    else:
+        st.sidebar.info("ℹ️ Nenhuma OM encontrada com os critérios")
+        return [], [diretoria_selecionada] if diretoria_selecionada != 'Todas' else []
+
 # =========================================================
 # SIDEBAR (STATUS + MENU)
 # =========================================================
@@ -212,10 +348,30 @@ with st.sidebar:
     if has_gsheets():
         st.success("Google Sheets: ✅ Conectado")
         
-        if st.button("🔄 Limpar cache e recarregar", use_container_width=True):
-            read_tab_df.clear()
-            st.success("Cache limpo!")
-            st.rerun()
+        # Botão de atualização da lista de OMs
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Cache Geral", use_container_width=True):
+                read_tab_df.clear()
+                st.success("Cache limpo!")
+                st.rerun()
+        
+        with col2:
+            if st.button("📋 Atualizar OMs", use_container_width=True):
+                load_oms_validation_data.clear()
+                st.success("Lista de OMs atualizada!")
+                st.rerun()
+        
+        # Status da validação de OMs
+        try:
+            df_oms = load_oms_validation_data()
+            if not df_oms.empty:
+                st.info(f"📋 {len(df_oms)} OMs carregadas")
+            else:
+                st.warning("⚠️ Lista de OMs vazia")
+        except Exception as e:
+            st.error(f"❌ Erro ao carregar OMs: {e}")
+            
     else:
         st.error("Google Sheets: ❌ Desconectado")
         st.warning("Configure o arquivo `.streamlit/secrets.toml`")
@@ -315,7 +471,6 @@ if MENU == "🗂️ Editor de Planilha":
                 )
             
             with col3:
-                # <<< CORREÇÃO 2: Lógica de download do Excel otimizada
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     edited_df.to_excel(writer, index=False, sheet_name=tab_name)
@@ -362,9 +517,8 @@ if MENU == "📊 Dashboards":
         
         st.info(f"📊 Analisando **{base_tab}** • **{len(df):,}** registros")
         
-        # <<< CORREÇÃO 1: Bloco de mapeamento de colunas movido para ANTES do expander
+        # Mapeamento inteligente de colunas
         try:
-            # Mapeamento inteligente de colunas baseado nos nomes encontrados
             col_mappings = {
                 'objeto': find_column(df, ["OBJETO DE VISTORIA", "OBJETO"]),
                 'om': find_column(df, ["OM APOIADA", "OM APOIADORA", "OM"]),
@@ -378,14 +532,12 @@ if MENU == "📊 Dashboards":
                 'status': find_column(df, ["STATUS - ATUALIZACAO SEMANAL", "STATUS - ATUALIZAÇÃO SEMANAL", "Status", "VT EXECUTADA POR"])
             }
             
-            # Garantir que col_mappings seja sempre um dicionário válido
             if not isinstance(col_mappings, dict):
                 col_mappings = {}
         
         except Exception as e:
             st.error(f"❌ Erro no mapeamento de colunas: {e}")
             col_mappings = {}
-            st.info("🔄 Usando mapeamento manual de colunas. Por favor, verifique os nomes das colunas.")
 
         # Debug: Mostrar informações sobre as colunas encontradas
         with st.expander("🔍 Debug - Colunas Mapeadas", expanded=False):
@@ -395,7 +547,6 @@ if MENU == "📊 Dashboards":
                 st.write(list(df.columns))
             with col2:
                 st.write("**Mapeamento encontrado:**")
-                # Agora esta linha funciona, pois col_mappings já existe
                 mapped_cols = {k: v for k, v in col_mappings.items() if v is not None}
                 st.write(mapped_cols if mapped_cols else "Nenhuma coluna mapeada automaticamente")
 
@@ -416,8 +567,11 @@ if MENU == "📊 Dashboards":
         except Exception as e:
             st.warning(f"⚠️ Aviso na conversão de dados: {e}")
 
-        # Sidebar com filtros (com verificações de segurança)
+        # Sidebar com filtros OTIMIZADOS
         st.sidebar.markdown("### 🔍 Filtros")
+        
+        # Carrega dados de OMs da validação
+        df_oms = load_oms_validation_data()
         
         # Filtro de período
         col_data_base = col_mappings.get('data_solicitacao') or col_mappings.get('data_vistoria')
@@ -436,22 +590,32 @@ if MENU == "📊 Dashboards":
             except Exception as e:
                 st.sidebar.warning(f"⚠️ Erro no filtro de data: {e}")
 
-        # Outros filtros com verificação de existência
+        # NOVO: Filtro hierárquico de OMs
+        if not df_oms.empty:
+            try:
+                oms_selecionadas, diretorias_selecionadas = create_om_filter_component(df_oms, "dashboard")
+            except Exception as e:
+                st.sidebar.error(f"❌ Erro no filtro de OMs: {e}")
+                oms_selecionadas, diretorias_selecionadas = [], []
+        else:
+            st.sidebar.warning("⚠️ Lista de OMs não disponível - usando filtro manual")
+            oms_selecionadas, diretorias_selecionadas = [], []
+
+        # Outros filtros (mantendo compatibilidade)
         filtros = {}
         
-        filter_configs = [
-            ('diretoria', "🏢 Diretoria Responsável"),
+        # Filtros manuais para campos não cobertos pelo sistema de OMs
+        manual_filter_configs = [
             ('situacao', "📋 Situação"),
-            ('urgencia', "⚡ Urgência"),
-            ('om', "🏛️ OM Apoiadora")
+            ('urgencia', "⚡ Urgência")
         ]
         
-        for key, label in filter_configs:
+        for key, label in manual_filter_configs:
             col_name = col_mappings.get(key)
             if col_name and col_name in df.columns:
                 try:
                     options = get_filter_options(df[col_name])
-                    if options:  # Só adiciona o filtro se houver opções
+                    if options:
                         filtros[key] = st.sidebar.multiselect(label, options, key=f"filter_{key}")
                 except Exception as e:
                     st.sidebar.warning(f"⚠️ Erro no filtro {label}: {e}")
@@ -467,6 +631,7 @@ if MENU == "📊 Dashboards":
         # Aplicar filtros
         df_filtered = df.copy()
 
+        # Filtro de período
         if periodo and len(periodo) == 2 and col_data_base:
             ini, fim = periodo
             df_filtered = df_filtered[
@@ -474,252 +639,31 @@ if MENU == "📊 Dashboards":
                 (df_filtered[col_data_base] <= pd.to_datetime(fim))
             ]
 
-        # Aplicar filtros das seleções
+        # Filtro de OMs (NOVO - Integrado)
+        col_om = col_mappings.get('om')
+        if oms_selecionadas and col_om and col_om in df_filtered.columns:
+            # Filtra por siglas exatas ou contendo as siglas
+            mask_om = df_filtered[col_om].astype(str).str.upper().isin([om.upper() for om in oms_selecionadas])
+            
+            # Se não encontrar correspondência exata, tenta busca por conteúdo
+            if not mask_om.any():
+                pattern = '|'.join([re.escape(om.upper()) for om in oms_selecionadas])
+                mask_om = df_filtered[col_om].astype(str).str.upper().str.contains(pattern, na=False, regex=True)
+            
+            df_filtered = df_filtered[mask_om]
+
+        # Filtro de Diretoria (quando selecionada manualmente)
+        col_diretoria = col_mappings.get('diretoria')
+        if diretorias_selecionadas and col_diretoria and col_diretoria in df_filtered.columns:
+            df_filtered = df_filtered[df_filtered[col_diretoria].astype(str).isin(diretorias_selecionadas)]
+
+        # Aplicar outros filtros manuais
         for filter_key, col_name in col_mappings.items():
+            if filter_key in ['om', 'diretoria']:  # Pula filtros já aplicados
+                continue
+                
             selected_options = filtros.get(filter_key)
             if selected_options and col_name and col_name in df_filtered.columns:
                 df_filtered = df_filtered[df_filtered[col_name].astype(str).isin(selected_options)]
 
         # KPIs
-        st.markdown("### 📈 Indicadores Principais")
-        
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        total_vistorias = len(df_filtered)
-        
-        # Finalizadas
-        finalizadas = 0
-        pct_finalizadas = 0
-        if col_mappings.get('situacao') and col_mappings['situacao'] in df_filtered.columns:
-            finalizadas = df_filtered[col_mappings['situacao']].astype(str).str.upper().str.contains('FINALIZADA', na=False).sum()
-            pct_finalizadas = (finalizadas / total_vistorias * 100) if total_vistorias > 0 else 0
-
-        # Prazos médios
-        prazo_medio_total = None
-        prazo_medio_exec = None
-        
-        if col_mappings.get('dias_total') and col_mappings['dias_total'] in df_filtered.columns:
-            prazo_medio_total = df_filtered[col_mappings['dias_total']].mean()
-            
-        if col_mappings.get('dias_execucao') and col_mappings['dias_execucao'] in df_filtered.columns:
-            prazo_medio_exec = df_filtered[col_mappings['dias_execucao']].mean()
-
-        # SLA
-        pct_sla = None
-        if col_mappings.get('dias_total') and col_mappings['dias_total'] in df_filtered.columns and total_vistorias > 0:
-            dentro_sla = (df_filtered[col_mappings['dias_total']] <= sla_dias).sum()
-            pct_sla = dentro_sla / total_vistorias * 100
-
-        with col1:
-            st.metric("📊 Total Vistorias", f"{total_vistorias:,}".replace(",", "."))
-        
-        with col2:
-            st.metric("✅ Finalizadas", f"{finalizadas:,} ({pct_finalizadas:.1f}%)")
-        
-        with col3:
-            st.metric("⏱️ Prazo Médio Total", f"{prazo_medio_total:.1f} dias" if prazo_medio_total is not None else "—")
-        
-        with col4:
-            st.metric("🚀 Prazo Médio Exec.", f"{prazo_medio_exec:.1f} dias" if prazo_medio_exec is not None else "—")
-        
-        with col5:
-            st.metric(f"🎯 SLA ≤{sla_dias}d", f"{pct_sla:.1f}%" if pct_sla is not None else "—")
-
-        st.markdown("---")
-
-        # Gráficos
-        st.markdown("### 📊 Análises Gráficas")
-        
-        # Evolução temporal
-        if col_data_base and col_data_base in df_filtered.columns and df_filtered[col_data_base].notna().any():
-            monthly_data = (
-                df_filtered.groupby(pd.Grouper(key=col_data_base, freq='MS'))
-                .size()
-                .reset_index(name='Vistorias')
-            )
-            
-            fig_evolucao = px.line(
-                monthly_data,
-                x=col_data_base,
-                y='Vistorias',
-                markers=True,
-                title="📈 Evolução Mensal de Vistorias",
-                template="plotly_white"
-            )
-            fig_evolucao.update_layout(height=400)
-            st.plotly_chart(fig_evolucao, use_container_width=True)
-
-        # 1. Vistorias por Diretoria
-        col_diretoria = col_mappings.get('diretoria')
-        if col_diretoria and col_diretoria in df_filtered.columns:
-            diretoria_data = (
-                df_filtered[col_diretoria]
-                .dropna()
-                .value_counts()
-                .reset_index()
-                .rename(columns={'count': 'Quantidade'}) 
-                .sort_values('Quantidade', ascending=True)
-            )
-            
-            if not diretoria_data.empty:
-                fig_dir = px.bar(
-                    diretoria_data,
-                    x='Quantidade',
-                    y=col_diretoria,
-                    orientation='h',
-                    title="🏢 Vistorias por Diretoria Responsável",
-                    template="plotly_white",
-                    color='Quantidade',
-                    color_continuous_scale='Blues'
-                )
-                fig_dir.update_layout(height=400, showlegend=False)
-                st.plotly_chart(fig_dir, use_container_width=True)
-
-        # 2. Distribuição por Situação (PIE CHART)
-        col_situacao = col_mappings.get('situacao')
-        if col_situacao and col_situacao in df_filtered.columns:
-            situacao_data = (
-                df_filtered[col_situacao]
-                .dropna()
-                .value_counts()
-                .reset_index()
-                .rename(columns={'count': 'Quantidade'})
-            )
-            
-            if not situacao_data.empty:
-                colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF']
-                
-                fig_sit = px.pie(
-                    situacao_data,
-                    names=col_situacao,
-                    values='Quantidade',
-                    title="📋 Distribuição por Situação",
-                    hole=0.4,
-                    color_discrete_sequence=colors
-                )
-                fig_sit.update_traces(
-                    textposition='inside',
-                    textinfo='percent+label',
-                    hovertemplate='<b>%{label}</b><br>Quantidade: %{value}<br>Percentual: %{percent}<extra></extra>'
-                )
-                fig_sit.update_layout(height=400)
-                st.plotly_chart(fig_sit, use_container_width=True)
-            else:
-                st.warning("⚠️ Não há dados de situação para exibir no gráfico.")
-        
-        # 3. Vistorias por Urgência
-        col_urgencia = col_mappings.get('urgencia')
-        if col_urgencia and col_urgencia in df_filtered.columns:
-            urgencia_data = (
-                df_filtered[col_urgencia]
-                .dropna()
-                .value_counts()
-                .reset_index()
-                .rename(columns={'count': 'Quantidade'})
-                .sort_values('Quantidade', ascending=False)
-            )
-            
-            if not urgencia_data.empty:
-                fig_urg = px.bar(
-                    urgencia_data,
-                    x=col_urgencia,
-                    y='Quantidade',
-                    title="⚡ Vistorias por Classificação de Urgência",
-                    template="plotly_white",
-                    color='Quantidade',
-                    color_continuous_scale='Reds'
-                )
-                fig_urg.update_layout(height=400, showlegend=False)
-                fig_urg.update_xaxes(tickangle=45)
-                st.plotly_chart(fig_urg, use_container_width=True)
-
-        # Heatmap temporal por situação
-        if (col_data_base and col_data_base in df_filtered.columns and
-            col_situacao and col_situacao in df_filtered.columns and
-            df_filtered[col_data_base].notna().any()):
-            
-            df_heatmap = df_filtered[[col_data_base, col_situacao]].dropna()
-            df_heatmap['Mes'] = df_heatmap[col_data_base].dt.to_period('M').dt.to_timestamp()
-            
-            heatmap_data = (
-                df_heatmap.groupby(['Mes', col_situacao])
-                .size()
-                .reset_index(name='Quantidade')
-                .pivot(index=col_situacao, columns='Mes', values='Quantidade')
-                .fillna(0)
-            )
-            
-            if not heatmap_data.empty and heatmap_data.shape[0] > 0 and heatmap_data.shape[1] > 0:
-                fig_heatmap = px.imshow(
-                    heatmap_data,
-                    aspect="auto",
-                    title="🔥 Heatmap - Situação por Mês",
-                    labels=dict(x="Mês", y="Situação", color="Quantidade"),
-                    color_continuous_scale="YlOrRd"
-                )
-                fig_heatmap.update_layout(height=400)
-                st.plotly_chart(fig_heatmap, use_container_width=True)
-
-        # SLA por Diretoria
-        col_dias_total = col_mappings.get('dias_total')
-        if (col_diretoria and col_diretoria in df_filtered.columns and
-            col_dias_total and col_dias_total in df_filtered.columns):
-            
-            sla_data = df_filtered.dropna(subset=[col_diretoria, col_dias_total]).copy()
-            sla_data['Dentro_SLA'] = sla_data[col_dias_total] <= sla_dias
-            sla_summary = (
-                sla_data.groupby(col_diretoria)['Dentro_SLA']
-                .mean() * 100
-            ).reset_index(name='pct_sla').sort_values('pct_sla')
-            
-            fig_sla = px.bar(
-                sla_summary,
-                x='pct_sla',
-                y=col_diretoria,
-                orientation='h',
-                title=f"🎯 % Dentro do SLA (≤{sla_dias} dias) por Diretoria",
-                labels={'pct_sla': '% dentro do SLA'},
-                template="plotly_white"
-            )
-            fig_sla.update_layout(height=400)
-            st.plotly_chart(fig_sla, use_container_width=True)
-
-        # Detalhamento dos dados
-        st.markdown("### 📋 Detalhamento dos Dados")
-        
-        if col_data_base and col_data_base in df_filtered.columns:
-            df_show = df_filtered.sort_values(col_data_base, ascending=False).head(100)
-        else:
-            df_show = df_filtered.head(100)
-        
-        st.dataframe(df_show, use_container_width=True, height=400, hide_index=True)
-        
-        # Download dos dados filtrados
-        col1, _ = st.columns([1, 2]) # Ajustado para ocupar menos espaço
-        
-        with col1:
-            csv_filtered = df_filtered.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "⬇️ Baixar Dados Filtrados (CSV)",
-                csv_filtered,
-                file_name=f"{base_tab}_filtrado_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar dashboards: {e}")
-        st.exception(e) # Adiciona mais detalhes do erro para debug
-
-# =========================================================
-# RODAPÉ
-# =========================================================
-
-st.markdown("---")
-st.markdown(
-    "<div style='text-align: center; color: #666; font-size: 12px;'>"
-    "🚀 CRO1 Sistema - Desenvolvido com Streamlit • "
-    f"Última atualização: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
-    "</div>",
-    unsafe_allow_html=True
-)
