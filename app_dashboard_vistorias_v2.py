@@ -1,35 +1,65 @@
+# -*- coding: utf-8 -*-
+# CRO1 — Dashboard & Editor (Google Sheets) | Dark UI inspirado nos mockups
+
 import warnings
-warnings.filterwarnings("ignore", message=".*outside the limits for dates.*", category=UserWarning, module="openpyxl")
-warnings.filterwarnings("ignore", message=".*Data Validation extension is not supported and will be removed.*", category=UserWarning, module="openpyxl")
+warnings.filterwarnings("ignore")
 
+from datetime import datetime, date
 import unicodedata
-from datetime import datetime
-import re
 
-import gspread
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_option_menu import option_menu
 
-# =========================================================
-# CONFIGURAÇÃO GERAL
-# =========================================================
-st.set_page_config(
-    page_title="CRO1 — Editor & Dashboards (Sheets)",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# =============== CONFIG GERAL ===============
+st.set_page_config(page_title="CRO1 — Gestão de Vistorias", layout="wide")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
-# =========================================================
-# CONEXÃO GOOGLE SHEETS
-# =========================================================
+# =============== ESTILO (CSS) ===============
+DARK_CSS = """
+<style>
+/* containers */
+.block-container { padding-top: 1.2rem; max-width: 1400px; }
+[data-testid="stSidebar"] { background: #0b1220; border-right: 1px solid #0e172a; }
+section.main { background: #0a0f1c; }
+
+/* cards */
+.card {
+  background: linear-gradient(180deg,#0f172a 0%, #0b1220 100%);
+  border: 1px solid #111827; border-radius: 16px; padding: 16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.card-title { font-weight: 700; font-size: 0.95rem; color: #a7b0c3; letter-spacing:.4px; }
+.kpi { font-size: 2rem; font-weight: 800; color: #e5e7eb; }
+.kpi-sub { color: #9ca3af; font-size: .85rem; margin-top: .25rem; }
+
+/* buttons */
+.stButton>button {
+  border-radius: 12px !important; padding: 10px 14px;
+  border: 1px solid #1f2937; background: #122032;
+}
+.stButton>button:hover { filter: brightness(1.12); }
+
+/* table */
+tbody tr:hover { background: rgba(34,197,94,.06) !important; }
+
+/* badges simples */
+.badge { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem;
+  border:1px solid #233048; background:#0e1a2d; color:#c7d2fe; margin-right:6px;
+}
+</style>
+"""
+st.markdown(DARK_CSS, unsafe_allow_html=True)
+
+# =============== FUNÇÕES BASE (Sheets/cache) ===============
 def has_gsheets() -> bool:
     return (
         "gcp_service_account" in st.secrets
@@ -39,21 +69,23 @@ def has_gsheets() -> bool:
     )
 
 @st.cache_resource(show_spinner=False)
-def get_gs_client():
+def _gs_client():
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
 @st.cache_resource(show_spinner=False)
-def get_workbook():
-    return get_gs_client().open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
+def _book():
+    return _gs_client().open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
 
-# =========================================================
-# LEITURA TOLERANTE A CABEÇALHO
-# =========================================================
-def make_unique_headers(raw_headers):
+def _norm(s: str) -> str:
+    s = str(s)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return s.lower().strip()
+
+def _make_unique_headers(row):
     out, seen = [], {}
-    for j, h in enumerate(raw_headers, start=1):
+    for j, h in enumerate(row, start=1):
         h = (h or "").strip()
         if not h:
             h = f"col_{j}"
@@ -66,478 +98,349 @@ def make_unique_headers(raw_headers):
         out.append(h)
     return out
 
-def read_worksheet_safe(ws, header_row=None) -> pd.DataFrame:
-    try:
-        values = ws.get_all_values()
-        if not values:
-            return pd.DataFrame()
-
-        if header_row is None:
-            hdr_idx = next((i for i, row in enumerate(values) if any(str(c).strip() for c in row)), 0)
-        else:
-            hdr_idx = max(0, int(header_row) - 1)
-
-        headers = make_unique_headers(values[hdr_idx])
-        body = values[hdr_idx + 1:]
-
-        while body and not any(str(c).strip() for c in body[-1]):
-            body.pop()
-
-        df = pd.DataFrame(body, columns=headers).replace("", pd.NA)
-        return df
-    except Exception as e:
-        st.error(f"Erro ao ler worksheet: {e}")
+def _read_ws_loose(ws) -> pd.DataFrame:
+    values = ws.get_all_values()
+    if not values: 
         return pd.DataFrame()
+    # pega 1ª linha não totalmente vazia como cabeçalho
+    hdr_idx = next((i for i,row in enumerate(values) if any(str(c).strip() for c in row)), 0)
+    hdr = _make_unique_headers(values[hdr_idx])
+    body = values[hdr_idx+1:]
+    while body and not any(str(c).strip() for c in body[-1]):
+        body.pop()
+    df = pd.DataFrame(body, columns=hdr).replace("", pd.NA)
+    return df
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def read_tab_df(tab_name: str) -> pd.DataFrame:
-    try:
-        ws = get_workbook().worksheet(tab_name)
-        df = read_worksheet_safe(ws)
-        for col in df.columns:
-            if "DATA" in col.upper():
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-        return df
-    except Exception as e:
-        st.error(f"Erro ao ler aba {tab_name}: {e}")
-        return pd.DataFrame()
+    ws = _book().worksheet(tab_name)
+    df = _read_ws_loose(ws)
+    # normalizações úteis
+    for c in df.columns:
+        if "DATA" in c.upper():
+            df[c] = pd.to_datetime(df[c], errors="coerce")
+        if "QUANTIDADE" in c.upper() or "DIAS" in c.upper():
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
 
-def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header=True) -> bool:
+# --------- OMs (Validacao_de_Dados) com cache de 5 min ---------
+@st.cache_data(ttl=300, show_spinner=False)
+def load_oms_from_validation() -> pd.DataFrame:
+    """
+    Lê a aba 'Validacao_de_Dados' e retorna DF com colunas:
+    ['sigla','nome','diretoria'] (limpas/únicas)
+    """
     try:
-        sh = get_workbook()
-        try:
-            ws = sh.worksheet(tab_name)
-        except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(
-                title=tab_name,
-                rows=max(2000, len(df) + 10),
-                cols=max(10, len(df.columns))
-            )
-        ws.clear()
-        values = [list(map(str, df.columns))] + df.fillna("").astype(str).values.tolist() if keep_header \
-                 else df.fillna("").astype(str).values.tolist()
-        ws.update("A1", values, value_input_option="USER_ENTERED")
+        df = read_tab_df("Validacao_de_Dados")
+    except Exception:
+        return pd.DataFrame(columns=["sigla","nome","diretoria"])
+
+    # tenta detectar colunas por nome aproximado
+    col_sigla  = next((c for c in df.columns if _norm(c) in ("om","sigla")), None)
+    col_nome   = next((c for c in df.columns if "organizacao" in _norm(c) or "nome" in _norm(c)), None)
+    col_dir    = next((c for c in df.columns if "diretoria" in _norm(c)), None)
+
+    if not col_sigla:  # fallback: coluna 'N' (Sigla) em algumas versões
+        for c in df.columns:
+            if c.strip().upper().startswith("N"):
+                col_sigla = c; break
+
+    data = pd.DataFrame(columns=["sigla","nome","diretoria"])
+    if col_sigla:
+        data["sigla"] = df[col_sigla].astype(str).str.strip()
+    if col_nome:
+        data["nome"] = df[col_nome].astype(str).str.strip()
+    if col_dir:
+        data["diretoria"] = df[col_dir].astype(str).str.strip()
+
+    # limpa
+    data = data.dropna(subset=["sigla"]).drop_duplicates(subset=["sigla"])
+    # se faltar nome/diretoria, preenche vazio
+    for c in ["nome","diretoria"]:
+        if c not in data.columns: data[c] = ""
+    return data[["sigla","nome","diretoria"]]
+
+# =============== SIDEBAR / MENU ===============
+with st.sidebar:
+    st.markdown("### Sistema CRO1 — Gestão de Vistorias")
+    st.write("🔌 Google Sheets:", "ON ✅" if has_gsheets() else "OFF ❌")
+
+    if has_gsheets() and st.button("🔄 Atualizar dados (limpar cache)"):
         read_tab_df.clear()
-        return True
+        load_oms_from_validation.clear()
+        st.toast("Cache limpo. Recarregando…")
+        st.experimental_rerun()
+
+    MENU = option_menu(
+        "",
+        ["📊 Dashboard", "🗂 Editor (Sheets)"],
+        icons=["bar-chart","table"],
+        default_index=0,
+        styles={
+            "nav-link": {"font-size":"15px", "text-align":"left", "margin":"2px", "--hover-color":"#0b1220"},
+            "nav-link-selected": {"background-color":"#122032"},
+        }
+    )
+
+# =============== FILTROS HIERÁRQUICOS (Diretoria → OM) ===============
+def render_filters(df_base: pd.DataFrame):
+    """
+    Monta filtros com base no DF principal (ex.: ACOMPANHAMENTO VISTORIAS)
+    e na aba Validacao_de_Dados (para Diretoria→OM).
+    Retorna dict com filtros aplicados.
+    """
+    oms_val = load_oms_from_validation()
+    has_val = not oms_val.empty
+
+    # Detecta colunas do DF base
+    cols = list(df_base.columns)
+    def pick(*cands):
+        for x in cands:
+            for c in cols:
+                if _norm(c) == _norm(x): return c
+        for x in cands:
+            alvo = _norm(x)
+            for c in cols:
+                if alvo in _norm(c): return c
+        return None
+
+    c_dir = pick("Diretoria Responsável","Diretoria Responsavel","Diretoria")
+    c_om  = pick("OM APOIADA","OM APOIADORA","OM")
+    c_sit = pick("Situação","Situacao")
+    c_urg = pick("Classificação da Urgência","Classificacao da Urgencia","Urgencia")
+    c_obj = pick("OBJETO DE VISTORIA","OBJETO")
+    c_dtS = pick("DATA DA SOLICITAÇÃO","DATA DA SOLICITACAO")
+    c_dtV = pick("DATA DA VISTORIA")
+
+    # período
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Período</div>', unsafe_allow_html=True)
+    base_date_col = c_dtS or c_dtV
+    periodo = None
+    if base_date_col and df_base[base_date_col].notna().any():
+        dmin = pd.to_datetime(df_base[base_date_col]).min().date()
+        dmax = pd.to_datetime(df_base[base_date_col]).max().date()
+        periodo = st.date_input("Intervalo", (dmin, dmax))
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Diretoria → OM
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Filtros por Estrutura</div>', unsafe_allow_html=True)
+    if has_val:
+        dirs = sorted([d for d in oms_val["diretoria"].dropna().unique().tolist() if d])
+        dir_sel = st.selectbox("🏢 Diretoria Responsável", ["(Todas)"] + dirs, index=0)
+        # filtra OMs por diretoria selecionada
+        if dir_sel == "(Todas)":
+            om_pool = oms_val.copy()
+        else:
+            om_pool = oms_val[oms_val["diretoria"].astype(str) == dir_sel]
+        # label amigável: "SIGLA — Nome"
+        om_opts = (om_pool
+                   .assign(label=lambda d: d["sigla"].fillna("") + " — " + d["nome"].fillna(""))
+                   .sort_values("sigla"))
+        lookup = dict(zip(om_opts["label"], om_opts["sigla"]))
+        om_sel_labels = st.multiselect("🏛️ OM Apoiadora (digite para buscar)", om_opts["label"].tolist())
+        om_sel_siglas = [lookup[x] for x in om_sel_labels]
+    else:
+        # sem validação — fallback para OMs do DF base
+        st.info("Aba **Validacao_de_Dados** não encontrada ou vazia. Usando OMs do próprio dataset.")
+        om_list = sorted(df_base[c_om].dropna().astype(str).unique().tolist()) if c_om else []
+        om_sel_siglas = st.multiselect("🏛️ OM Apoiadora", om_list)
+
+    # situação / urgência
+    sit_sel = st.multiselect("📋 Situação", sorted(df_base[c_sit].dropna().astype(str).unique().tolist()) if c_sit else [])
+    urg_sel = st.multiselect("⚡ Urgência", sorted(df_base[c_urg].dropna().astype(str).unique().tolist()) if c_urg else [])
+    # busca por objeto
+    txt = st.text_input("🔎 Buscar no objeto de vistoria", placeholder="Palavra-chave…")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    return dict(
+        periodo=periodo, base_date_col=base_date_col,
+        diretoria=(None if not has_val else dir_sel if 'dir_sel' in locals() else None),
+        oms=om_sel_siglas, c_dir=c_dir, c_om=c_om, c_sit=c_sit, c_urg=c_urg, c_obj=c_obj
+    )
+
+def apply_filters(df: pd.DataFrame, f: dict) -> pd.DataFrame:
+    res = df.copy()
+    # período
+    if f["periodo"] and f["base_date_col"] in res.columns:
+        ini, fim = f["periodo"]
+        res = res[(pd.to_datetime(res[f["base_date_col"]]) >= pd.to_datetime(ini)) &
+                  (pd.to_datetime(res[f["base_date_col"]]) <= pd.to_datetime(fim))]
+    # OMs
+    if f["oms"] and f["c_om"] in res.columns:
+        res = res[res[f["c_om"]].astype(str).isin(f["oms"])]
+    # Situação / Urgência
+    if f["c_sit"] in res.columns and 'sit_sel' in f and f['sit_sel']:
+        res = res[res[f["c_sit"]].astype(str).isin(f['sit_sel'])]
+    if f["c_urg"] in res.columns and 'urg_sel' in f and f['urg_sel']:
+        res = res[res[f["c_urg"]].astype(str).isin(f['urg_sel'])]
+    # Diretoria (apenas se vier da validação e existir no DF base)
+    if f.get("diretoria") and f["diretoria"] != "(Todas)" and f["c_dir"] in res.columns:
+        res = res[res[f["c_dir"]].astype(str) == f["diretoria"]]
+    # palavra-chave no objeto
+    if f.get("c_obj") in res.columns:
+        q = st.session_state.get("search_q","").strip().lower()
+        if q:
+            res = res[res[f["c_obj"]].astype(str).str.lower().str.contains(q)]
+    return res
+
+# =============== DASHBOARD ===============
+def render_kpis(df: pd.DataFrame, fcols: dict):
+    c_sit = fcols.get("c_sit")
+    c_dias_total = next((c for c in df.columns if "TOTAL" in c.upper() and "DIAS" in c.upper()), None)
+    c_dias_exec  = next((c for c in df.columns if "EXEC" in c.upper() and "DIAS" in c.upper()), None)
+
+    total = len(df)
+    finalizadas = df[c_sit].astype(str).str.upper().str.contains("FINALIZADA").sum() if c_sit in df.columns else 0
+    pct_final = (finalizadas/total*100) if total else 0
+    prazo_total = df[c_dias_total].mean() if c_dias_total in df.columns else None
+    prazo_exec  = df[c_dias_exec].mean()  if c_dias_exec  in df.columns else None
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown('<div class="card"><div class="card-title">Vistorias</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi">{total:,}</div><div class="kpi-sub">Total filtrado</div></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="card"><div class="card-title">Finalizadas</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="kpi">{pct_final:,.1f}%</div><div class="kpi-sub">do total</div></div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="card"><div class="card-title">Prazo médio (total)</div>', unsafe_allow_html=True)
+        val = f"{prazo_total:,.1f} dias" if prazo_total is not None else "—"
+        st.markdown(f'<div class="kpi">{val}</div><div class="kpi-sub">tempo até atendimento</div></div>', unsafe_allow_html=True)
+    with col4:
+        st.markdown('<div class="card"><div class="card-title">Prazo médio (execução)</div>', unsafe_allow_html=True)
+        val = f"{prazo_exec:,.1f} dias" if prazo_exec is not None else "—"
+        st.markdown(f'<div class="kpi">{val}</div><div class="kpi-sub">tempo de execução</div></div>', unsafe_allow_html=True)
+
+def render_charts(df: pd.DataFrame, fcols: dict):
+    c_dir  = fcols.get("c_dir")
+    c_sit  = fcols.get("c_sit")
+    c_urg  = fcols.get("c_urg")
+    c_dtS  = fcols.get("base_date_col")
+
+    st.markdown("#### Visualizações")
+
+    # Evolução mensal
+    if c_dtS and df[c_dtS].notna().any():
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        tmp = (df.groupby(pd.Grouper(key=c_dtS, freq="MS")).size().reset_index(name="Vistorias"))
+        fig1 = px.line(tmp, x=c_dtS, y="Vistorias", markers=True, title="Evolução Mensal")
+        fig1.update_layout(margin=dict(l=10,r=10,b=10,t=40))
+        st.plotly_chart(fig1, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    cols = st.columns(2)
+    with cols[0]:
+        if c_dir in df.columns:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            tmp2 = df.groupby(c_dir, as_index=False).size().sort_values("size", ascending=False).head(15)
+            fig2 = px.bar(tmp2, x=c_dir, y="size", title="Por Diretoria")
+            fig2.update_layout(margin=dict(l=10,r=10,b=10,t=40))
+            st.plotly_chart(fig2, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+    with cols[1]:
+        if c_urg in df.columns:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            tmp4 = df.groupby(c_urg, as_index=False).size().sort_values("size", ascending=False)
+            fig4 = px.bar(tmp4, x=c_urg, y="size", title="Por Classificação de Urgência")
+            fig4.update_layout(margin=dict(l=10,r=10,b=10,t=40))
+            st.plotly_chart(fig4, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    if c_sit in df.columns:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        tmp3 = df.groupby(c_sit, as_index=False).size()
+        fig3 = px.pie(tmp3, names=c_sit, values="size", hole=0.4, title="Distribuição por Situação")
+        fig3.update_layout(margin=dict(l=10,r=10,b=10,t=40))
+        st.plotly_chart(fig3, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def render_table(df: pd.DataFrame, fcols: dict):
+    st.markdown("#### Itens recentes")
+    base_col = fcols.get("base_date_col")
+    if base_col in df.columns:
+        df = df.sort_values(base_col, ascending=False)
+    st.dataframe(df.head(80), use_container_width=True, height=360)
+
+# =============== EDITOR ===============
+def render_editor():
+    st.title("🗂 Editor (Google Sheets)")
+    if not has_gsheets():
+        st.stop()
+    sh = _book()
+    tabs = [ws.title for ws in sh.worksheets()]
+    st.success("Conectado ao Google Sheets ✅")
+    st.caption(f"Planilha: {st.secrets['gsheets']['spreadsheet_url']}")
+
+    colA, colB = st.columns([2,1])
+    with colA:
+        tab_name = st.selectbox("Aba:", tabs, index=0)
+    with colB:
+        if st.button("↻ Recarregar aba"):
+            read_tab_df.clear()
+            st.experimental_rerun()
+
+    try:
+        df_tab = read_tab_df(tab_name)
     except Exception as e:
-        st.error(f"Erro ao salvar aba {tab_name}: {e}")
-        return False
+        st.error(f"Falha ao ler a aba **{tab_name}**: {e}")
+        st.stop()
 
-# =========================================================
-# HELPERS
-# =========================================================
-def normalize_text(s: str) -> str:
-    s = str(s)
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
-    return s.lower().strip()
+    st.caption(f"Linhas: {len(df_tab)} • Colunas: {list(df_tab.columns)}")
+    edited = st.data_editor(df_tab, use_container_width=True, height=520, num_rows="dynamic", key=f"edit_{tab_name}")
 
-def find_column(df: pd.DataFrame, options) -> str | None:
-    cols = list(df.columns)
-    for opt in options:
-        for col in cols:
-            if normalize_text(col) == normalize_text(opt):
-                return col
-    for opt in options:
-        target = normalize_text(opt)
-        for col in cols:
-            if target in normalize_text(col):
-                return col
-    return None
+    if st.button("💾 Salvar alterações"):
+        try:
+            ws = _book().worksheet(tab_name)
+            ws.clear()
+            values = [list(map(str, edited.columns))] + edited.fillna("").astype(str).values.tolist()
+            ws.update("A1", values, value_input_option="USER_ENTERED")
+            read_tab_df.clear()
+            st.success("Alterações salvas!")
+        except Exception as e:
+            st.error(f"Erro ao salvar: {e}")
 
-def create_card(title: str):
+# =============== ROTEAMENTO ===============
+if MENU == "📊 Dashboard":
+    st.title("Sistema CRO1 — Gestão de Vistorias")
+
+    if not has_gsheets():
+        st.warning("Configure o Google Sheets em `.streamlit/secrets.toml`.")
+        st.stop()
+
+    # escolha da aba base (normalmente "ACOMPANHAMENTO VISTORIAS")
+    sh = _book()
+    all_tabs = [ws.title for ws in sh.worksheets()]
+    base_tab = st.selectbox("Fonte do Dashboard (aba):", all_tabs, index=0)
+
+    try:
+        df_base = read_tab_df(base_tab)
+    except Exception as e:
+        st.error(f"Falha ao ler a aba **{base_tab}**: {e}")
+        st.stop()
+
+    # Filtros (sidebar)
+    with st.sidebar:
+        st.markdown("### Filtros")
+        filters = render_filters(df_base)
+
+    # campo de busca global por objeto (mantém compatibilidade)
+    with st.sidebar:
+        st.session_state["search_q"] = st.text_input("Buscar no objeto (rápido)", key="q_global", placeholder="ex.: telhado, reforma…")
+
+    df_f = apply_filters(df_base, filters)
+
+    # Badges básicos
     st.markdown(
-        f"<div style='padding:12px 16px;border-radius:12px;background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);"
-        f"border:none;color:white;font-weight:700;font-size:20px;text-align:center;margin:10px 0;'>{title}</div>",
+        f'<span class="badge">Aba: {base_tab}</span>'
+        f'<span class="badge">Registros: {len(df_f)}</span>',
         unsafe_allow_html=True
     )
 
-def get_filter_options(series):
-    try:
-        return sorted(series.dropna().astype(str).unique().tolist())
-    except Exception:
-        return sorted(list({str(x) for x in series.dropna().tolist()}))
+    render_kpis(df_f, filters)
+    render_charts(df_f, filters)
+    render_table(df_f, filters)
 
-# =========================================================
-# VALIDACAO_DE_DADOS → OMs com Diretoria (cache 5 min)
-# =========================================================
-@st.cache_data(ttl=300, show_spinner=False)
-def load_oms_validation_data() -> pd.DataFrame:
-    dfv = read_tab_df("Validacao_de_Dados")
-    if dfv.empty:
-        return pd.DataFrame()
-
-    # procurar colunas preferenciais
-    pref_sigla = ["Sigla", "OM", "Sigla OM"]
-    pref_nome  = ["Organização Militar", "Organizacao Militar", "Nome", "OM Nome"]
-    pref_dir   = ["Diretoria Responsável", "Diretoria Responsavel", "Diretoria"]
-
-    c_sigla = find_column(dfv, pref_sigla)
-    c_nome  = find_column(dfv, pref_nome)
-    c_dir   = find_column(dfv, pref_dir)
-
-    # fallback por posição (B,C,D,M) somente se nada foi encontrado
-    cols = list(dfv.columns)
-    if not c_sigla and len(cols) > 1: c_sigla = cols[1]
-    if not c_nome  and len(cols) > 2: c_nome  = cols[2]
-    if not c_dir   and len(cols) > 3: c_dir   = cols[3]
-
-    if not c_sigla:
-        return pd.DataFrame()
-
-    df_oms = (
-        dfv[[c_sigla] + ([c_nome] if c_nome else []) + ([c_dir] if c_dir else [])]
-        .rename(columns={c_sigla: "sigla", c_nome or c_sigla: "nome_completo", c_dir or c_sigla: "diretoria"})
-        .fillna({"nome_completo": "" , "diretoria": ""})
-    )
-
-    df_oms["sigla"] = df_oms["sigla"].astype(str).str.strip()
-    df_oms["nome_completo"] = df_oms["nome_completo"].astype(str).str.strip()
-    df_oms["diretoria"] = df_oms["diretoria"].astype(str).str.strip()
-    df_oms = df_oms[df_oms["sigla"].str.len() >= 2].drop_duplicates(subset=["sigla"])
-    df_oms["display_name"] = df_oms.apply(
-        lambda r: f"{r['sigla']} - {r['nome_completo']}" if r["nome_completo"] and r["nome_completo"] != r["sigla"] else r["sigla"],
-        axis=1
-    )
-    df_oms["search_text"] = (df_oms["sigla"] + " " + df_oms["nome_completo"]).str.upper()
-    return df_oms.sort_values(["diretoria", "sigla"])
-
-def create_om_filter_component(df_oms: pd.DataFrame, key_suffix: str = ""):
-    if df_oms.empty:
-        st.sidebar.warning("⚠️ Lista de OMs não disponível")
-        return [], []
-
-    diretorias = ["Todas"] + sorted(df_oms["diretoria"].dropna().unique().tolist())
-    diretoria_sel = st.sidebar.selectbox("🏢 Diretoria Responsável", diretorias, key=f"dir_filter_{key_suffix}")
-
-    if diretoria_sel == "Todas":
-        base = df_oms
-    else:
-        base = df_oms[df_oms["diretoria"] == diretoria_sel]
-
-    busca = st.sidebar.text_input("🔎 Buscar OM (sigla ou nome)", key=f"om_search_{key_suffix}", placeholder="Digite para buscar...")
-    if busca:
-        up = busca.upper()
-        base = base[base["search_text"].str.contains(up, na=False)]
-
-    opcoes = base["display_name"].tolist()
-    selecionadas = st.sidebar.multiselect(
-        f"🏛️ OM Apoiadora ({len(opcoes)} encontradas)",
-        opcoes,
-        key=f"om_multi_{key_suffix}"
-    )
-
-    siglas = []
-    if selecionadas:
-        m = base.set_index("display_name")["sigla"]
-        for item in selecionadas:
-            if item in m.index:
-                siglas.append(m.loc[item])
-
-    return siglas, ([diretoria_sel] if diretoria_sel != "Todas" else [])
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.markdown("### 🔌 Status da Conexão")
-    if has_gsheets():
-        st.success("Google Sheets: ✅ Conectado")
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("🔄 Cache Geral", use_container_width=True):
-                read_tab_df.clear(); load_oms_validation_data.clear()
-                st.success("Cache limpo!")
-                st.rerun()
-        with c2:
-            if st.button("📋 Atualizar OMs", use_container_width=True):
-                load_oms_validation_data.clear()
-                st.success("Lista de OMs atualizada!")
-                st.rerun()
-
-        try:
-            _oms = load_oms_validation_data()
-            st.info(f"📋 {len(_oms)} OMs carregadas" if not _oms.empty else "⚠️ Lista de OMs vazia")
-        except Exception as e:
-            st.error(f"❌ Erro ao carregar OMs: {e}")
-    else:
-        st.error("Google Sheets: ❌ Desconectado")
-        st.warning("Configure o arquivo `.streamlit/secrets.toml`")
-
-    st.markdown("---")
-    MENU = option_menu(
-        "🚀 CRO1 Sistema",
-        ["🗂️ Editor de Planilha", "📊 Dashboards"],
-        icons=["table", "bar-chart-fill"],
-        default_index=0,
-        menu_icon="grid-3x3-gap-fill",
-        styles={
-            "container": {"padding": "5px", "background-color": "#fafafa"},
-            "icon": {"color": "#667eea", "font-size": "18px"},
-            "nav-link": {"font-size": "16px", "text-align": "left", "margin": "0px"},
-            "nav-link-selected": {"background-color": "#667eea"},
-        }
-    )
-
-# =========================================================
-# 1) EDITOR
-# =========================================================
-if MENU == "🗂️ Editor de Planilha":
-    create_card("🗂️ Editor de Planilha Google Sheets")
-    if not has_gsheets():
-        st.error("❌ Google Sheets não configurado. Verifique o arquivo secrets.toml")
-        st.stop()
-
-    try:
-        workbook = get_workbook()
-        tabs = [ws.title for ws in workbook.worksheets()]
-        st.success("✅ Google Sheets conectado!")
-        st.caption(f"📋 **Planilha:** {st.secrets['gsheets']['spreadsheet_url']}")
-
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            tab_name = st.selectbox("📂 Escolha a aba para visualizar/editar:", tabs, index=0)
-        with c2:
-            if st.button("↻ Recarregar", use_container_width=True, key="btn_recarregar_editor"):
-                read_tab_df.clear(); st.rerun()
-
-        df_tab = read_tab_df(tab_name)
-        if df_tab.empty:
-            st.warning("⚠️ A aba selecionada está vazia.")
-        else:
-            st.info(f"📊 **Linhas:** {len(df_tab):,} • **Colunas:** {len(df_tab.columns)}")
-            edited_df = st.data_editor(
-                df_tab, use_container_width=True, num_rows="dynamic",
-                key=f"editor_{tab_name}", height=500, hide_index=True
-            )
-            c1, c2, c3 = st.columns([2, 2, 2])
-            with c1:
-                if st.button("💾 Salvar Alterações", use_container_width=True):
-                    with st.spinner("Salvando..."):
-                        df_save = edited_df.copy()
-                        for col in df_save.columns:
-                            if "DATA" in col.upper():
-                                df_save[col] = pd.to_datetime(df_save[col], errors="coerce")
-                                df_save[col] = df_save[col].dt.strftime("%Y-%m-%d")
-                        df_save = df_save.fillna("")
-                        if overwrite_tab_from_df(tab_name, df_save):
-                            st.success("✅ Alterações salvas!")
-                            read_tab_df.clear(); st.rerun()
-                        else:
-                            st.error("❌ Erro ao salvar alterações.")
-            with c2:
-                if st.button("➕ Adicionar Linha", use_container_width=True):
-                    st.warning("Use o editor para inserir linhas (num_rows='dynamic' já permite).")
-            with c3:
-                st.caption("Para excluir, baixe CSV, edite e reenvie (ou implemente coluna 'Excluir?').")
-    except Exception as e:
-        st.error(f"❌ Erro no Editor de Planilha: {e}")
-
-# =========================================================
-# 2) DASHBOARDS
-# =========================================================
-if MENU == "📊 Dashboards":
-    create_card("📊 Dashboards de Vistorias")
-    if not has_gsheets():
-        st.error("❌ Google Sheets não configurado. Verifique o arquivo secrets.toml")
-        st.stop()
-
-    try:
-        workbook = get_workbook()
-        tabs = [ws.title for ws in workbook.worksheets()]
-        base_tab = st.selectbox("📂 Escolha a aba para análise:", tabs, index=0, key="dashboard_tab")
-        df = read_tab_df(base_tab)
-        if df.empty:
-            st.warning("⚠️ A aba selecionada está vazia."); st.stop()
-
-        st.info(f"📊 Analisando **{base_tab}** • **{len(df):,}** registros")
-
-        col_mappings = {
-            'objeto':           find_column(df, ["OBJETO DE VISTORIA", "OBJETO"]),
-            'om':               find_column(df, ["OM APOIADA", "OM APOIADORA", "OM"]),
-            'diretoria':        find_column(df, ["Diretoria Responsavel", "Diretoria Responsável", "Diretoria"]),
-            'urgencia':         find_column(df, ["Classificacao da Urgencia", "Classificação da Urgência", "Urgencia"]),
-            'situacao':         find_column(df, ["Situacao", "Situação"]),
-            'data_solicitacao': find_column(df, ["DATA DA SOLICITACAO", "DATA DA SOLICITAÇÃO"]),
-            'data_vistoria':    find_column(df, ["DATA DA VISTORIA"]),
-            'dias_total':       find_column(df, ["QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO"]),
-            'dias_execucao':    find_column(df, ["QUANTIDADE DE DIAS PARA EXECUCAO", "QUANTIDADE DE DIAS PARA EXECUÇÃO"]),
-            'status':           find_column(df, ["STATUS - ATUALIZACAO SEMANAL", "STATUS - ATUALIZAÇÃO SEMANAL", "Status", "VT EXECUTADA POR"])
-        }
-
-        with st.expander("🔍 Debug - Colunas Mapeadas", expanded=False):
-            c1, c2 = st.columns(2)
-            with c1: st.write("**Colunas disponíveis:**"); st.write(list(df.columns))
-            with c2: st.write("**Mapeamento encontrado:**"); st.write({k:v for k,v in col_mappings.items() if v})
-
-        # Conversões
-        for col in [col_mappings.get('data_solicitacao'), col_mappings.get('data_vistoria')]:
-            if col and col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors="coerce")
-        for col in [col_mappings.get('dias_total'), col_mappings.get('dias_execucao')]:
-            if col and col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        # Filtros
-        st.sidebar.markdown("### 🔍 Filtros")
-        df_oms = load_oms_validation_data()
-
-        col_data_base = col_mappings.get('data_solicitacao') or col_mappings.get('data_vistoria')
-        periodo = None
-        if col_data_base and col_data_base in df.columns and df[col_data_base].notna().any():
-            min_dt = pd.to_datetime(df[col_data_base].min()).date()
-            max_dt = pd.to_datetime(df[col_data_base].max()).date()
-            periodo = st.sidebar.date_input("📅 Período", value=(min_dt, max_dt), min_value=min_dt, max_value=max_dt)
-
-        if not df_oms.empty:
-            oms_selecionadas, diretorias_selecionadas = create_om_filter_component(df_oms, "dashboard")
-        else:
-            st.sidebar.warning("⚠️ Lista de OMs não disponível - usando filtro manual")
-            oms_selecionadas, diretorias_selecionadas = [], []
-
-        filtros = {}
-        for key, label in [('situacao',"📋 Situação"), ('urgencia',"⚡ Urgência")]:
-            col_name = col_mappings.get(key)
-            if col_name and col_name in df.columns:
-                options = get_filter_options(df[col_name])
-                if options:
-                    filtros[key] = st.sidebar.multiselect(label, options, key=f"filter_{key}")
-
-        sla_dias = st.sidebar.number_input("⏱️ SLA (dias)", min_value=1, max_value=365, value=30)
-
-        # Aplicar filtros
-        df_f = df.copy()
-        if periodo and len(periodo) == 2 and col_data_base:
-            ini, fim = periodo
-            df_f = df_f[(df_f[col_data_base] >= pd.to_datetime(ini)) & (df_f[col_data_base] <= pd.to_datetime(fim))]
-        col_om = col_mappings.get('om')
-        if oms_selecionadas and col_om and col_om in df_f.columns:
-            mask_om = df_f[col_om].astype(str).str.upper().isin([om.upper() for om in oms_selecionadas])
-            if not mask_om.any():
-                pattern = '|'.join([re.escape(om.upper()) for om in oms_selecionadas])
-                mask_om = df_f[col_om].astype(str).str.upper().str.contains(pattern, na=False, regex=True)
-            df_f = df_f[mask_om]
-        col_dir = col_mappings.get('diretoria')
-        if diretorias_selecionadas and col_dir and col_dir in df_f.columns:
-            df_f = df_f[df_f[col_dir].astype(str).isin(diretorias_selecionadas)]
-        for k, col_name in col_mappings.items():
-            if k in ['om','diretoria']: 
-                continue
-            sel = filtros.get(k)
-            if sel and col_name and col_name in df_f.columns:
-                df_f = df_f[df_f[col_name].astype(str).isin(sel)]
-
-        # KPIs
-        st.markdown("### 📈 Indicadores Principais")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        total = len(df_f)
-        finalizadas = 0; pct_final = 0
-        if col_mappings.get('situacao') and col_mappings['situacao'] in df_f.columns:
-            finalizadas = df_f[col_mappings['situacao']].astype(str).str.upper().str.contains('FINALIZADA', na=False).sum()
-            pct_final = (finalizadas/total*100) if total>0 else 0
-        prazo_total = df_f[col_mappings['dias_total']].mean() if col_mappings.get('dias_total') in df_f.columns else None
-        prazo_exec  = df_f[col_mappings['dias_execucao']].mean() if col_mappings.get('dias_execucao') in df_f.columns else None
-        pct_sla = None
-        if col_mappings.get('dias_total') in df_f.columns and total>0:
-            dentro = (df_f[col_mappings['dias_total']] <= sla_dias).sum()
-            pct_sla = dentro/total*100
-
-        with c1: st.metric("📊 Total Vistorias", f"{total:,}".replace(",", "."))
-        with c2: st.metric("✅ Finalizadas", f"{finalizadas:,} ({pct_final:.1f}%)")
-        with c3: st.metric("⏱️ Prazo Médio Total", f"{prazo_total:.1f} dias" if prazo_total is not None else "—")
-        with c4: st.metric("🚀 Prazo Médio Exec.", f"{prazo_exec:.1f} dias" if prazo_exec is not None else "—")
-        with c5: st.metric(f"🎯 SLA ≤{sla_dias}d", f"{pct_sla:.1f}%" if pct_sla is not None else "—")
-
-        if oms_selecionadas or diretorias_selecionadas or any(filtros.values()) or (periodo and len(periodo)==2):
-            applied = []
-            if oms_selecionadas: applied.append(f"{len(oms_selecionadas)} OM(s)")
-            if diretorias_selecionadas: applied.append(f"{len(diretorias_selecionadas)} Diretoria(s)")
-            if any(filtros.values()): applied.extend([f"{len(v)} {k}" for k,v in filtros.items() if v])
-            st.info(f"🔍 **Filtros aplicados:** {', '.join(applied)}")
-
-        st.markdown("---")
-        st.markdown("### 📊 Análises Gráficas")
-
-        # Evolução
-        if col_data_base and col_data_base in df_f.columns and df_f[col_data_base].notna().any():
-            monthly = df_f.groupby(pd.Grouper(key=col_data_base, freq="MS")).size().reset_index(name="Vistorias")
-            fig1 = px.line(monthly, x=col_data_base, y="Vistorias", markers=True, title="📈 Evolução Mensal de Vistorias", template="plotly_white")
-            fig1.update_layout(height=400)
-            st.plotly_chart(fig1, use_container_width=True)
-
-        # Diretoria
-        if col_dir and col_dir in df_f.columns:
-            diretoria_data = (
-                df_f[col_dir].dropna().value_counts()
-                .reset_index(name="Quantidade")
-                .rename(columns={"index": col_dir})
-                .sort_values("Quantidade", ascending=True)
-            )
-            if not diretoria_data.empty:
-                fig_dir = px.bar(diretoria_data, x="Quantidade", y=col_dir, orientation="h",
-                                 title="🏢 Vistorias por Diretoria Responsável", template="plotly_white",
-                                 color="Quantidade", color_continuous_scale="Blues")
-                fig_dir.update_layout(height=400, showlegend=False)
-                st.plotly_chart(fig_dir, use_container_width=True)
-
-        # Situação
-        col_sit = col_mappings.get('situacao')
-        if col_sit and col_sit in df_f.columns:
-            situacao_data = df_f[col_sit].dropna().value_counts().reset_index(name="Quantidade").rename(columns={"index": col_sit})
-            if not situacao_data.empty:
-                fig_sit = px.pie(situacao_data, names=col_sit, values="Quantidade",
-                                 title="📋 Distribuição por Situação", hole=0.4,
-                                 color_discrete_sequence=['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF'])
-                fig_sit.update_traces(textposition="inside", textinfo="percent+label",
-                                      hovertemplate='<b>%{label}</b><br>Quantidade: %{value}<br>Percentual: %{percent}<extra></extra>')
-                fig_sit.update_layout(height=400)
-                st.plotly_chart(fig_sit, use_container_width=True)
-
-        # Urgência
-        col_urg = col_mappings.get('urgencia')
-        if col_urg and col_urg in df_f.columns:
-            urgencia_data = (
-                df_f[col_urg].dropna().value_counts()
-                .reset_index(name="Quantidade").rename(columns={"index": col_urg})
-                .sort_values("Quantidade", ascending=False)
-            )
-            if not urgencia_data.empty:
-                fig_urg = px.bar(urgencia_data, x=col_urg, y="Quantidade",
-                                 title="⚡ Vistorias por Classificação de Urgência", template="plotly_white",
-                                 color="Quantidade", color_continuous_scale="Reds")
-                fig_urg.update_layout(height=400, showlegend=False)
-                fig_urg.update_xaxes(tickangle=45)
-                st.plotly_chart(fig_urg, use_container_width=True)
-
-        # Por OM (quando filtradas)
-        if oms_selecionadas and col_om and col_om in df_f.columns:
-            om_data = (
-                df_f[col_om].dropna().value_counts()
-                .reset_index(name="Quantidade").rename(columns={"index": col_om})
-                .sort_values("Quantidade", ascending=True)
-            )
-            if not om_data.empty:
-                fig_om = px.bar(om_data, x="Quantidade", y=col_om, orientation="h",
-                                title=f"🏛️ Vistorias por OM Selecionada ({len(oms_selecionadas)} filtradas)",
-                                template="plotly_white", color="Quantidade", color_continuous_scale="Greens")
-                fig_om.update_layout(height=400, showlegend=False)
-                st.plotly_chart(fig_om, use_container_width=True)
-
-        # Heatmap temporal
-        if col_data_base and col_sit and (col_data_base in df_f.columns) and (col_sit in df_f.columns) and df_f[col_data_base].notna().any():
-            aux = df_f[[col_data_base, col_sit]].dropna().copy()
-            aux["Mes"] = aux[col_data_base].dt.to_period("M").dt.to_timestamp()
-            heat = (aux.groupby(["Mes", col_sit]).size().reset_index(name="Qtd")
-                    .pivot(index=col_sit, columns="Mes", values="Qtd").fillna(0))
-            if not heat.empty:
-                fig_hm = px.imshow(heat, aspect="auto", title="🔥 Heatmap - Vistorias por Situação ao Longo do Tempo",
-                                   labels=dict(x="Mês", y="Situação", color="Quantidade"),
-                                   x=[d.strftime("%Y-%m") for d in heat.columns], y=heat.index,
-                                   color_continuous_scale="Viridis")
-                fig_hm.update_layout(height=500)
-                st.plotly_chart(fig_hm, use_container_width=True)
-
-        st.markdown("### 📋 Dados Detalhados")
-        st.dataframe(df_f, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"❌ Erro no Dashboard: {e}")
+else:
+    render_editor()
