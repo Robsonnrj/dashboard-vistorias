@@ -1,379 +1,73 @@
-# CRO1 Dashboard - Sistema Transformado v2.0
-# main.py - Aplicação Principal
+# app.py
+# -*- coding: utf-8 -*-
+# CRO1 — Editor + Dashboards (Google Sheets) — v2.0
 
 import warnings
-warnings.filterwarnings("ignore", message=".*outside the limits for dates.*", category=UserWarning, module="openpyxl")
-warnings.filterwarnings("ignore", message=".*Data Validation extension is not supported.*", category=UserWarning, module="openpyxl")
-
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from streamlit_option_menu import option_menu
-from datetime import datetime
-import sys
-import os
-from pathlib import Path
-
-# Adiciona o diretório atual ao path para imports locais
-current_dir = Path(__file__).parent
-sys.path.append(str(current_dir))
-
-# Configuração da página
-st.set_page_config(
-    page_title="CRO1 Dashboard v2.0",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="expanded"
+warnings.filterwarnings(
+    "ignore",
+    message=".*outside the limits for dates.*",
+    category=UserWarning,
+    module="openpyxl",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=".*Data Validation extension is not supported and will be removed.*",
+    category=UserWarning,
+    module="openpyxl",
 )
 
-# CSS personalizado
-def load_custom_css():
-    """Carrega CSS personalizado para o tema"""
-    css = """
-    <style>
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        color: white;
-        text-align: center;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
-    }
-    
-    .filter-section {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-        border: 1px solid #dee2e6;
-    }
-    
-    .status-badge {
-        display: inline-block;
-        padding: 0.25rem 0.75rem;
-        border-radius: 0.5rem;
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin: 0.25rem;
-    }
-    
-    .status-success { 
-        background-color: #4ECDC4; 
-        color: white; 
-    }
-    .status-warning { 
-        background-color: #FECA57; 
-        color: black; 
-    }
-    .status-danger { 
-        background-color: #FF6B6B; 
-        color: white; 
-    }
-    .status-info {
-        background-color: #667eea;
-        color: white;
-    }
-    
-    .stButton > button {
-        border-radius: 8px;
-        border: none;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
+import unicodedata
+from datetime import datetime
+from typing import Dict, List, Tuple
 
-# Função para verificar conexão Google Sheets
-def check_gsheets_connection():
-    """Verifica se as configurações do Google Sheets estão disponíveis"""
-    try:
-        return (
-            "gcp_service_account" in st.secrets
-            and "gsheets" in st.secrets
-            and "spreadsheet_url" in st.secrets["gsheets"]
-            and bool(st.secrets["gsheets"]["spreadsheet_url"])
-        )
-    except Exception:
-        return False
-
-# Função para criar card estilizado
-def create_card(title: str, content: str = ""):
-    """Cria um card estilizado"""
-    st.markdown(
-        f"""
-        <div class='main-header'>
-            <h1 style='margin: 0; font-size: 2.5rem;'>🚀 {title}</h1>
-            <p style='margin: 0.5rem 0 0 0; opacity: 0.9; font-size: 1.1rem;'>{content}</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-def main():
-    """Função principal da aplicação"""
-    
-    # Carrega CSS personalizado
-    load_custom_css()
-    
-    # Header principal
-    create_card(
-        "CRO1 Dashboard v2.0", 
-        "Sistema Modular de Análise de Vistorias - Transformação Completa"
-    )
-    
-    # Sidebar com status e menu
-    render_sidebar()
-    
-    # Menu principal
-    menu_selection = render_main_menu()
-    
-    # Roteamento baseado na seleção do menu
-    route_handler(menu_selection)
-
-def render_sidebar():
-    """Renderiza a sidebar com status e controles"""
-    
-    with st.sidebar:
-        st.markdown("### 🔌 Status do Sistema")
-        
-        # Status da conexão
-        if check_gsheets_connection():
-            st.markdown(
-                '<div class="status-badge status-success">✅ Google Sheets Conectado</div>',
-                unsafe_allow_html=True
-            )
-            
-            # Botões de controle
-            st.markdown("### ⚡ Controles")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("🔄 Cache", use_container_width=True, help="Limpar cache do sistema"):
-                    clear_cache()
-                    st.success("Cache limpo!")
-                    st.rerun()
-            
-            with col2:
-                if st.button("📊 Status", use_container_width=True, help="Ver estatísticas"):
-                    show_stats()
-                    
-        else:
-            st.markdown(
-                '<div class="status-badge status-danger">❌ Google Sheets Desconectado</div>',
-                unsafe_allow_html=True
-            )
-            st.warning("Configure o arquivo `.streamlit/secrets.toml`")
-            
-            # Instruções de configuração
-            with st.expander("📋 Como Configurar"):
-                st.markdown("""
-                **1. Crie o arquivo `.streamlit/secrets.toml`:**
-                ```
-                [gcp_service_account]
-                type = "service_account"
-                project_id = "your-project-id"
-                private_key_id = "your-private-key-id"
-                private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
-                client_email = "your-service-account@project.iam.gserviceaccount.com"
-                client_id = "your-client-id"
-                auth_uri = "https://accounts.google.com/o/oauth2/auth"
-                token_uri = "https://oauth2.googleapis.com/token"
-
-                [gsheets]
-                spreadsheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID"
-                ```
-                
-                **2. Configure as permissões do Google Sheets**
-                
-                **3. Reinicie a aplicação**
-                """)
-
-def render_main_menu():
-    """Renderiza o menu principal"""
-    
-    with st.sidebar:
-        st.markdown("---")
-        
-        menu = option_menu(
-            "🚀 Menu Principal",
-            [
-                "📊 Dashboard Principal", 
-                "📋 Editor de Dados",
-                "⚡ Análise de Urgências", 
-                "📈 Tendências e Métricas",
-                "🔍 Relatórios Avançados",
-                "⚙️ Configurações"
-            ],
-            icons=[
-                "bar-chart-fill", "table", "lightning-fill", 
-                "graph-up", "file-earmark-text", "gear-fill"
-            ],
-            default_index=0,
-            menu_icon="grid-3x3-gap-fill",
-            styles={
-                "container": {"padding": "5px", "background-color": "#fafafa"},
-                "icon": {"color": "#667eea", "font-size": "18px"},
-                "nav-link": {
-                    "font-size": "16px", 
-                    "text-align": "left", 
-                    "margin": "0px",
-                    "padding": "10px 15px"
-                },
-                "nav-link-selected": {
-                    "background-color": "#667eea",
-                    "color": "white"
-                },
-            }
-        )
-    
-    return menu
-
-def clear_cache():
-    """Limpa todos os caches"""
-    try:
-        st.cache_data.clear()
-        st.cache_resource.clear()
-    except Exception as e:
-        st.error(f"Erro ao limpar cache: {e}")
-
-def show_stats():
-    """Mostra estatísticas do sistema"""
-    with st.sidebar.expander("📊 Estatísticas do Sistema"):
-        st.write("**Cache Status**: Ativo")
-        st.write("**Sessão**: Ativa")
-        st.write("**Última atualização**: ", datetime.now().strftime("%H:%M:%S"))
-
-def route_handler(menu_selection):
-    """Gerencia o roteamento entre as diferentes páginas"""
-    
-    if menu_selection == "📊 Dashboard Principal":
-        render_dashboard_page()
-        
-    elif menu_selection == "📋 Editor de Dados":
-        render_editor_page()
-        
-    elif menu_selection == "⚡ Análise de Urgências":
-        render_urgency_page()
-        
-    elif menu_selection == "📈 Tendências e Métricas":
-        render_trends_page()
-        
-    elif menu_selection == "🔍 Relatórios Avançados":
-        render_reports_page()
-        
-    elif menu_selection == "⚙️ Configurações":
-        render_settings_page()
-
-# Importa as funções das páginas (colocar os arquivos na pasta pages/)
-try:
-    from pages.dashboard import render_dashboard_page
-    from pages.editor import render_editor_page
-    from pages.urgency import render_urgency_page
-    from pages.trends import render_trends_page
-    from pages.reports import render_reports_page
-    from pages.settings import render_settings_page
-except ImportError:
-    # Fallback se as páginas não existirem
-    def render_dashboard_page():
-        st.error("❌ Arquivo pages/dashboard.py não encontrado")
-    def render_editor_page():
-        st.error("❌ Arquivo pages/editor.py não encontrado")
-    def render_urgency_page():
-        st.error("❌ Arquivo pages/urgency.py não encontrado")
-    def render_trends_page():
-        st.error("❌ Arquivo pages/trends.py não encontrado")
-    def render_reports_page():
-        st.error("❌ Arquivo pages/reports.py não encontrado")
-    def render_settings_page():
-        st.error("❌ Arquivo pages/settings.py não encontrado")
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"❌ Erro na aplicação: {str(e)}")
-        st.exception(e)
-    
-    # Rodapé
-    st.markdown("---")
-    st.markdown(
-        f"""
-        <div style='text-align: center; color: #666; font-size: 14px; padding: 1rem;'>
-            🚀 <strong>CRO1 Dashboard v2.0</strong> - Sistema Modular de Gestão de Vistorias<br>
-            <small>Transformação Completa • Última atualização: {datetime.now().strftime('%d/%m/%Y às %H:%M')}</small>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-# pages/dashboard.py
-# Dashboard Principal - CRO1 v2.0
-
-import streamlit as st
+import gspread
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import gspread
+import streamlit as st
 from google.oauth2.service_account import Credentials
-import numpy as np
-import unicodedata
-import io
+from streamlit_option_menu import option_menu
 
-# Configurações do Google Sheets
+# =========================================================
+# CONFIG GERAL
+# =========================================================
+st.set_page_config(page_title="CRO1 — Editor & Dashboards (Sheets)", layout="wide")
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
 
-@st.cache_resource
-def get_gs_client():
-    """Cliente gspread autenticado"""
-    try:
-        info = dict(st.secrets["gcp_service_account"])
-        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"Erro na autenticação: {e}")
-        return None
+# =========================================================
+# CONEXÃO GOOGLE SHEETS
+# =========================================================
+def has_gsheets() -> bool:
+    return (
+        "gcp_service_account" in st.secrets
+        and "gsheets" in st.secrets
+        and "spreadsheet_url" in st.secrets["gsheets"]
+        and bool(st.secrets["gsheets"]["spreadsheet_url"])
+    )
 
-@st.cache_resource  
-def get_workbook():
-    """Workbook do Google Sheets"""
-    try:
-        client = get_gs_client()
-        if client:
-            return client.open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
-    except Exception as e:
-        st.error(f"Erro ao abrir planilha: {e}")
-        return None
+@st.cache_resource(show_spinner=False)
+def _gs_client():
+    """Cliente gspread autenticado via service account do secrets.toml"""
+    info = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return gspread.authorize(creds)
 
-def make_unique_headers(raw_headers):
-    """Gera nomes únicos para cabeçalhos"""
+@st.cache_resource(show_spinner=False)
+def _book():
+    """Spreadsheet (arquivo) aberto pela URL do secrets.toml"""
+    return _gs_client().open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
+
+# ===== Leituras/gravações tolerantes a cabeçalho “bagunçado” =====
+def _make_unique_headers(raw_headers: List[str]) -> List[str]:
+    """Gera nomes únicos: vazio -> col_1; duplicados -> nome_2, nome_3, ..."""
     out, seen = [], {}
     for j, h in enumerate(raw_headers, start=1):
         h = (h or "").strip()
         if not h:
             h = f"col_{j}"
-        
         base = h
         if base in seen:
             seen[base] += 1
@@ -383,400 +77,437 @@ def make_unique_headers(raw_headers):
         out.append(h)
     return out
 
-@st.cache_data(ttl=300)
-def load_worksheet_data(tab_name: str) -> pd.DataFrame:
-    """Carrega dados de uma worksheet"""
-    try:
-        workbook = get_workbook()
-        if not workbook:
-            return pd.DataFrame()
-            
-        worksheet = workbook.worksheet(tab_name)
-        values = worksheet.get_all_values()
-        
-        if not values:
-            return pd.DataFrame()
-
-        # Identifica cabeçalho
-        header_row = 0
-        for i, row in enumerate(values):
-            if any(str(c).strip() for c in row):
-                header_row = i
-                break
-
-        headers = make_unique_headers(values[header_row])
-        data_rows = values[header_row + 1:]
-
-        # Remove linhas vazias
-        while data_rows and not any(str(c).strip() for c in data_rows[-1]):
-            data_rows.pop()
-
-        if not data_rows:
-            return pd.DataFrame(columns=headers)
-
-        df = pd.DataFrame(data_rows, columns=headers).replace("", pd.NA)
-        
-        # Converte tipos
-        for col in df.columns:
-            if "DATA" in col.upper():
-                df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
-            elif any(keyword in col.upper() for keyword in ["DIAS", "QUANTIDADE", "NUMERO"]):
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        
-        return df
-        
-    except Exception as e:
-        st.error(f"Erro ao carregar {tab_name}: {e}")
+def read_ws_loose(ws, header_row=None) -> pd.DataFrame:
+    """
+    Lê a worksheet tolerando cabeçalho repetido/mesclado/vazio.
+    - Se header_row não for dado, usa a primeira linha que tenha algum conteúdo.
+    - Garante nomes únicos para as colunas.
+    """
+    values = ws.get_all_values()  # lista de listas
+    if not values:
         return pd.DataFrame()
 
-@st.cache_data(ttl=900)
-def load_oms_validation_data() -> pd.DataFrame:
-    """Carrega dados de OMs da aba de validação"""
+    # acha a linha do cabeçalho
+    if header_row is None:
+        hdr_idx = next(
+            (i for i, row in enumerate(values) if any(str(c).strip() for c in row)),
+            0
+        )
+    else:
+        hdr_idx = max(0, int(header_row) - 1)
+
+    headers = _make_unique_headers(values[hdr_idx])
+    body = values[hdr_idx + 1 :]
+    # corta linhas completamente vazias no fim (opcional)
+    while body and not any(str(c).strip() for c in body[-1]):
+        body.pop()
+
+    df = pd.DataFrame(body, columns=headers)
+    # troca strings vazias por NA (opcional)
+    df = df.replace("", pd.NA)
+    return df
+
+def write_ws_over(ws, df: pd.DataFrame):
+    """Sobrescreve a aba a partir de A1 com o DataFrame mostrado na tela."""
+    ws.clear()
+    headers = list(df.columns)
+    rows = df.fillna("").astype(str).values.tolist()
+    ws.update("A1", [headers] + rows, value_input_option="USER_ENTERED")
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_tab_df(tab_name: str) -> pd.DataFrame:
+    """Lê uma aba do Sheets como DataFrame (infere header automaticamente)."""
+    ws = _book().worksheet(tab_name)
+    df = read_ws_loose(ws)
+    # normaliza datas
+    for c in df.columns:
+        if "DATA" in str(c).upper():
+            df[c] = pd.to_datetime(df[c], errors="coerce")
+    return df
+
+def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header=True):
+    """
+    Sobrescreve a aba com o DataFrame.
+    - Se keep_header=True, usa df.columns como cabeçalho na linha 1.
+    """
+    sh = _book()
     try:
-        df_validation = load_worksheet_data("Validacao_de_Dados")
-        
-        if df_validation.empty:
-            return pd.DataFrame()
-        
-        # Mapeia colunas automaticamente
-        column_mapping = {}
-        for col in df_validation.columns:
-            col_upper = col.upper()
-            if 'OM' in col_upper and not column_mapping.get('sigla'):
-                column_mapping['sigla'] = col
-            elif 'ORGANIZACAO MILITAR' in col_upper or 'ORGANIZAÇÃO MILITAR' in col_upper:
-                column_mapping['nome_completo'] = col
-            elif 'DIRETORIA' in col_upper:
-                column_mapping['diretoria'] = col
+        ws = sh.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab_name, rows=max(2000, len(df) + 10), cols=max(10, len(df.columns)))
+    else:
+        ws.clear()
 
-        # Se não mapeou automaticamente, usa posição
-        cols = list(df_validation.columns)
-        if not column_mapping.get('sigla') and len(cols) > 1:
-            column_mapping['sigla'] = cols[1]
-        if not column_mapping.get('nome_completo') and len(cols) > 2:
-            column_mapping['nome_completo'] = cols[2]
-        if not column_mapping.get('diretoria') and len(cols) > 3:
-            column_mapping['diretoria'] = cols[3]
+    if keep_header:
+        values = [list(map(str, df.columns))] + df.fillna("").astype(str).values.tolist()
+    else:
+        values = df.fillna("").astype(str).values.tolist()
 
-        # Processa dados
-        oms_data = []
-        for _, row in df_validation.iterrows():
-            sigla = str(row.get(column_mapping.get('sigla', ''), '')).strip()
-            nome_completo = str(row.get(column_mapping.get('nome_completo', ''), '')).strip()
-            diretoria = str(row.get(column_mapping.get('diretoria', ''), '')).strip()
-            
-            if not sigla or sigla == 'nan' or len(sigla) < 2:
-                continue
-                
-            om_entry = {
-                'sigla': sigla,
-                'nome_completo': nome_completo if nome_completo != 'nan' else sigla,
-                'diretoria': diretoria if diretoria != 'nan' else 'Não Especificada',
-                'display_name': f"{sigla} - {nome_completo}" if nome_completo != 'nan' and nome_completo != sigla else sigla,
-                'search_text': f"{sigla} {nome_completo}".upper()
-            }
-            oms_data.append(om_entry)
+    ws.update("A1", values, value_input_option="USER_ENTERED")
+    # invalida cache de leitura
+    read_tab_df.clear()
 
-        if not oms_data:
-            return pd.DataFrame()
+# =========================================================
+# HELPERS (normalização e mapeamento de colunas)
+# =========================================================
+def _norm(s: str) -> str:
+    s = str(s)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return s.lower().strip()
 
-        df_oms = pd.DataFrame(oms_data)
-        df_oms = df_oms.drop_duplicates(subset=['sigla'], keep='first')
-        df_oms = df_oms.sort_values(['diretoria', 'sigla'])
-        
-        return df_oms
-        
-    except Exception as e:
-        st.error(f"Erro ao carregar dados de OMs: {e}")
-        return pd.DataFrame()
-
-def find_column(df: pd.DataFrame, patterns: list) -> str:
-    """Encontra coluna por padrões"""
-    for pattern in patterns:
-        for col in df.columns:
-            if pattern.upper() in col.upper():
-                return col
+def col_or_none(df: pd.DataFrame, opts: List[str]) -> str | None:
+    cols = list(df.columns)
+    # exata
+    for o in opts:
+        for c in cols:
+            if _norm(c) == _norm(o):
+                return c
+    # contém
+    for o in opts:
+        alvo = _norm(o)
+        for c in cols:
+            if alvo in _norm(c):
+                return c
     return None
 
-def create_om_filter_component(df_oms: pd.DataFrame, key_suffix: str = ""):
-    """Cria filtro hierárquico de OMs"""
-    
-    if df_oms.empty:
-        st.sidebar.warning("⚠️ Lista de OMs não disponível")
-        return [], []
-
-    # Filtro de Diretoria
-    diretorias_disponiveis = ['Todas'] + sorted(df_oms['diretoria'].unique().tolist())
-    diretoria_selecionada = st.sidebar.selectbox(
-        "🏢 Diretoria Responsável",
-        diretorias_disponiveis,
-        key=f"dir_filter_{key_suffix}"
+def card_title(txt: str):
+    st.markdown(
+        "<div style='padding:8px 12px;border-radius:10px;background:#f6f6f9;"
+        "border:1px solid #e5e7eb;font-weight:700;font-size:20px;'>"
+        f"{txt}</div>",
+        unsafe_allow_html=True
     )
-    
-    # Filtra OMs por diretoria
-    if diretoria_selecionada == 'Todas':
-        oms_filtradas = df_oms
-    else:
-        oms_filtradas = df_oms[df_oms['diretoria'] == diretoria_selecionada]
-    
-    # Campo de busca
-    search_term = st.sidebar.text_input(
-        "🔍 Buscar OM",
-        key=f"om_search_{key_suffix}",
-        placeholder="Digite sigla ou nome..."
-    )
-    
-    # Filtra por busca
-    if search_term:
-        search_upper = search_term.upper()
-        mask = oms_filtradas['search_text'].str.contains(search_upper, na=False, regex=False)
-        oms_para_selecao = oms_filtradas[mask]
-    else:
-        oms_para_selecao = oms_filtradas
-    
-    # Multiselect
-    opcoes_om = oms_para_selecao['display_name'].tolist()
-    
-    if opcoes_om:
-        oms_selecionadas = st.sidebar.multiselect(
-            f"🏛️ OM Apoiadora ({len(opcoes_om)} encontradas)",
-            opcoes_om,
-            key=f"om_multi_{key_suffix}",
-            help=f"Filtradas da {diretoria_selecionada}"
-        )
-        
-        # Converte para siglas
-        siglas_selecionadas = []
-        if oms_selecionadas:
-            for om_display in oms_selecionadas:
-                sigla = oms_para_selecao[oms_para_selecao['display_name'] == om_display]['sigla'].iloc[0]
-                siglas_selecionadas.append(sigla)
-        
-        return siglas_selecionadas, [diretoria_selecionada] if diretoria_selecionada != 'Todas' else []
-    else:
-        st.sidebar.info("ℹ️ Nenhuma OM encontrada")
-        return [], [diretoria_selecionada] if diretoria_selecionada != 'Todas' else []
 
-def render_dashboard_page():
-    """Renderiza página principal do dashboard"""
-    
-    st.markdown("## 📊 Dashboard Principal")
-    st.markdown("Análise completa de vistorias com KPIs em tempo real e filtros avançados")
-    
-    # Verifica conexão
-    if not get_workbook():
-        st.error("❌ Erro de conexão com Google Sheets. Verifique a configuração.")
-        return
-    
-    # Obtém lista de abas
+# =========================================================
+# VALIDACAO_DE_DADOS → mapa Diretoria→OM e lista de OMs
+# =========================================================
+@st.cache_data(ttl=300, show_spinner=False)
+def load_oms_from_validation() -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    """
+    Lê a aba 'Validacao_de_Dados' e retorna:
+      - df_oms com colunas padronizadas: ['Sigla','Nome','Diretoria']
+      - mapa diretoria -> lista de siglas de OM (ordenado)
+    Aceita variações de nomes das colunas.
+    """
     try:
-        workbook = get_workbook()
-        tabs = [ws.title for ws in workbook.worksheets()]
-        
-        if not tabs:
-            st.warning("Nenhuma aba encontrada na planilha")
-            return
-            
-    except Exception as e:
-        st.error(f"Erro ao acessar planilha: {e}")
-        return
+        dfv = read_tab_df("Validacao_de_Dados")
+    except Exception:
+        # Sem aba? devolve vazio
+        return pd.DataFrame(columns=["Sigla", "Nome", "Diretoria"]), {}
 
-    # Seleção da aba
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        base_tab = st.selectbox(
-            "📂 Selecione a aba para análise:",
-            tabs,
-            key="dashboard_tab"
-        )
-    
-    with col2:
-        if st.button("🔄 Atualizar", use_container_width=True):
-            load_worksheet_data.clear()
-            load_oms_validation_data.clear()
-            st.rerun()
+    # identificar colunas (sigla, nome, diretoria)
+    c_sigla = col_or_none(dfv, ["Sigla", "OM", "Sigla OM"])
+    c_nome  = col_or_none(dfv, ["Organização Militar", "Organizacao Militar", "Nome", "OM Nome"])
+    c_dir   = col_or_none(dfv, ["Diretoria Responsável", "Diretoria Responsavel", "Diretoria"])
 
-    # Carrega dados principais
-    df = load_worksheet_data(base_tab)
-    
-    if df.empty:
-        st.warning("⚠️ Nenhum dado encontrado na aba selecionada")
-        return
+    if not c_sigla:
+        # fallback: se não achar, cria vazio
+        return pd.DataFrame(columns=["Sigla", "Nome", "Diretoria"]), {}
 
-    st.success(f"✅ {len(df):,} registros carregados de **{base_tab}**")
+    # se o nome não existir, usa a própria sigla
+    if not c_nome:
+        dfv["__nome__"] = dfv[c_sigla]
+        c_nome = "__nome__"
 
-    # Mapeamento de colunas
-    column_mappings = {
-        'objeto': find_column(df, ["OBJETO DE VISTORIA", "OBJETO"]),
-        'om': find_column(df, ["OM APOIADA", "OM APOIADORA", "OM"]),
-        'diretoria': find_column(df, ["DIRETORIA RESPONSAVEL", "DIRETORIA"]),
-        'urgencia': find_column(df, ["CLASSIFICACAO DA URGENCIA", "URGENCIA"]),
-        'situacao': find_column(df, ["SITUACAO"]),
-        'data_solicitacao': find_column(df, ["DATA DA SOLICITACAO"]),
-        'data_vistoria': find_column(df, ["DATA DA VISTORIA"]),
-        'dias_total': find_column(df, ["QUANTIDADE DE DIAS PARA TOTAL"]),
-        'dias_execucao': find_column(df, ["QUANTIDADE DE DIAS PARA EXECUCAO"]),
-        'status': find_column(df, ["STATUS", "VT EXECUTADA POR"])
-    }
+    if not c_dir:
+        dfv["__dir__"] = ""
+        c_dir = "__dir__"
 
-    # Sidebar com filtros
-    st.sidebar.markdown("### 🔍 Filtros Avançados")
-    
-    # Carrega dados de OMs
-    df_oms = load_oms_validation_data()
-    
-    # Filtros hierárquicos de OMs
-    oms_selecionadas, diretorias_selecionadas = create_om_filter_component(df_oms, "dashboard")
-
-    # SLA
-    sla_dias = st.sidebar.number_input(
-        "⏱️ SLA (dias)",
-        min_value=1,
-        max_value=365,
-        value=30
+    df_oms = (
+        dfv[[c_sigla, c_nome, c_dir]]
+        .rename(columns={c_sigla: "Sigla", c_nome: "Nome", c_dir: "Diretoria"})
+        .dropna(subset=["Sigla"])
+        .astype({"Sigla": str, "Nome": str, "Diretoria": str})
     )
 
-    # Aplica filtros
-    df_filtered = df.copy()
+    # limpar espaços
+    df_oms["Sigla"] = df_oms["Sigla"].str.strip()
+    df_oms["Nome"]  = df_oms["Nome"].str.strip()
+    df_oms["Diretoria"] = df_oms["Diretoria"].str.strip()
 
-    # Filtro de OMs
-    if oms_selecionadas and column_mappings.get('om'):
-        col_om = column_mappings['om']
-        pattern = '|'.join([om.upper() for om in oms_selecionadas])
-        mask = df_filtered[col_om].astype(str).str.upper().str.contains(pattern, na=False, regex=True)
-        df_filtered = df_filtered[mask]
+    # mapa diretoria -> siglas
+    mapa: Dict[str, List[str]] = {}
+    for dir_, grp in df_oms.groupby("Diretoria"):
+        siglas = sorted(grp["Sigla"].dropna().astype(str).str.strip().unique().tolist())
+        mapa[dir_] = siglas
 
-    # KPIs principais
-    st.markdown("### 📈 Indicadores Principais")
-    
-    total_vistorias = len(df_filtered)
-    
-    # Calcula métricas
-    finalizadas = 0
-    pct_finalizadas = 0
-    if column_mappings.get('situacao'):
-        col_sit = column_mappings['situacao']
-        finalizadas = df_filtered[col_sit].astype(str).str.upper().str.contains('FINALIZADA', na=False).sum()
-        pct_finalizadas = (finalizadas / total_vistorias * 100) if total_vistorias > 0 else 0
+    return df_oms, mapa
 
-    prazo_medio_total = None
-    if column_mappings.get('dias_total'):
-        prazo_medio_total = pd.to_numeric(df_filtered[column_mappings['dias_total']], errors='coerce').mean()
+# =========================================================
+# SIDEBAR (STATUS + MENU)
+# =========================================================
+with st.sidebar:
+    st.write("🔌 Google Sheets:", "ON ✅" if has_gsheets() else "OFF ❌")
+    if not has_gsheets():
+        st.error("Secrets não detectado. Configure `.streamlit/secrets.toml`.")
 
+    if has_gsheets() and st.button("🧹 Limpar cache e recarregar"):
+        read_tab_df.clear()
+        load_oms_from_validation.clear()
+        st.success("Cache limpo.")
+        st.rerun()
+
+    MENU = option_menu(
+        "CRO1 — Sistema",
+        ["🗂️ Editor da Planilha", "📊 Dashboards"],
+        icons=["table", "bar-chart"],
+        default_index=0,
+        menu_icon="grid"
+    )
+
+# =========================================================
+# 1) EDITOR DA PLANILHA (visualizar/editar/salvar)
+# =========================================================
+if MENU == "🗂️ Editor da Planilha":
+    st.title("🗂️ Editor da Planilha (Google Sheets)")
+    if not has_gsheets():
+        st.stop()
+
+    sh = _book()
+    tabs = [ws.title for ws in sh.worksheets()]
+    st.success("Google Sheets conectado ✅")
+    st.caption(f"Planilha: {st.secrets['gsheets']['spreadsheet_url']}")
+
+    # escolha de aba
+    tab_name = st.selectbox("Escolha a aba para visualizar/editar:", tabs, index=0)
+    btn_reload = st.button("↻ Recarregar aba selecionada")
+
+    if btn_reload:
+        read_tab_df.clear()
+
+    # carrega DF da aba
+    try:
+        df_tab = read_tab_df(tab_name)
+    except Exception as e:
+        st.error(f"Falha ao ler a aba **{tab_name}**: {e}")
+        st.stop()
+
+    st.caption(f"Linhas: {len(df_tab)} • Colunas: {list(df_tab.columns)}")
+
+    # Editor interativo
+    edited_df = st.data_editor(
+        df_tab,
+        use_container_width=True,
+        num_rows="dynamic",
+        key=f"editor_{tab_name}",
+        height=520,
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Salvar alterações na aba"):
+            try:
+                # tentativa de converter colunas com "DATA" para ISO antes de salvar
+                _df_out = edited_df.copy()
+                for c in _df_out.columns:
+                    if "DATA" in str(c).upper():
+                        _df_out[c] = pd.to_datetime(_df_out[c], errors="coerce")
+                        _df_out[c] = _df_out[c].dt.strftime("%Y-%m-%d")
+
+                overwrite_tab_from_df(tab_name, _df_out, keep_header=True)
+                st.success(f"Alterações salvas em **{tab_name}**.")
+            except Exception as e:
+                st.error(f"Falha ao salvar: {e}")
+
+    with col2:
+        csv = edited_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ Baixar CSV desta aba", csv, file_name=f"{tab_name}.csv", mime="text/csv")
+
+# =========================================================
+# 2) DASHBOARDS (usa diretamente a aba escolhida)
+# =========================================================
+if MENU == "📊 Dashboards":
+    st.title("📊 Resumos (Dashboards)")
+
+    if not has_gsheets():
+        st.warning("Ative o Google Sheets para carregar dashboards.")
+        st.stop()
+
+    sh = _book()
+    tabs = [ws.title for ws in sh.worksheets()]
+
+    # escolha da aba base para o dashboard (ex.: ACOMPANHAMENTO VISTORIAS)
+    base_tab = st.selectbox(
+        "Escolha a aba (fonte dos gráficos/KPIs):",
+        tabs,
+        index=0,
+        key="dashboard_tab",
+    )
+
+    try:
+        df = read_tab_df(base_tab)
+    except Exception as e:
+        st.error(f"Falha ao ler a aba **{base_tab}**: {e}")
+        st.stop()
+
+    if df.empty:
+        st.warning("A aba está vazia.")
+        st.stop()
+
+    # --------- Mapeamento tolerante de colunas ---------
+    c_obj = col_or_none(df, ["OBJETO DE VISTORIA", "OBJETO"])
+    c_om  = col_or_none(df, ["OM APOIADA", "OM APOIADORA", "OM"])
+    c_dir = col_or_none(df, ["Diretoria Responsavel", "Diretoria Responsável", "Diretoria"])
+    c_urg = col_or_none(df, ["Classificacao da Urgencia", "Classificação da Urgência", "Urgencia"])
+    c_sit = col_or_none(df, ["Situacao", "Situação"])
+    c_data_solic = col_or_none(df, ["DATA DA SOLICITACAO", "DATA DA SOLICITAÇÃO"])
+    c_data_vist  = col_or_none(df, ["DATA DA VISTORIA"])
+    c_dias_total = col_or_none(df, ["QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO"])
+    c_dias_exec  = col_or_none(df, ["QUANTIDADE DE DIAS PARA EXECUCAO", "QUANTIDADE DE DIAS PARA EXECUÇÃO"])
+    c_status     = col_or_none(df, ["STATUS - ATUALIZACAO SEMANAL", "Status"])
+
+    # Tipos
+    for c in [c_data_solic, c_data_vist]:
+        if c in df.columns:
+            df[c] = pd.to_datetime(df[c], errors="coerce")
+    for c in [c_dias_total, c_dias_exec]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    st.caption(f"Aba: **{base_tab}** • Linhas: {len(df)}")
+
+    # ====== Filtros Hierárquicos (Diretoria -> OM) com Validação_de_Dados ======
+    st.sidebar.subheader("Filtros (Dashboards)")
+
+    df_oms, mapa_dir_om = load_oms_from_validation()
+    indicador_valid = "✅ lista oficial de OMs carregada" if not df_oms.empty else "⚠️ sem lista oficial; usando dados da aba"
+
+    # Diretoria
+    diretoria_opts = sorted(set(df_oms["Diretoria"].dropna().astype(str))) if not df_oms.empty else (
+        sorted(df[c_dir].dropna().astype(str).unique().tolist()) if c_dir in df.columns else []
+    )
+    diretoria_sel = st.sidebar.selectbox("🏢 Diretoria Responsável", ["(Todas)"] + diretoria_opts)
+
+    # OM (dependente da diretoria)
+    if diretoria_sel != "(Todas)" and mapa_dir_om:
+        opcoes_om = mapa_dir_om.get(diretoria_sel, [])
+    else:
+        # fallback: usa OMs existentes na aba base
+        opcoes_om = (
+            sorted(df[c_om].dropna().astype(str).unique().tolist()) if c_om in df.columns else []
+        )
+
+    # Busca com autocomplete
+    st.sidebar.caption(indicador_valid)
+    busca_om = st.sidebar.text_input("🔎 Buscar OM (sigla ou nome)")
+    if busca_om and not df_oms.empty:
+        pattern = _norm(busca_om)
+        # filtra por sigla ou nome (case-insensitive e acento-insensitive)
+        candidatos = (
+            df_oms[
+                df_oms.apply(
+                    lambda r: (pattern in _norm(r["Sigla"])) or (pattern in _norm(r["Nome"])),
+                    axis=1
+                )
+            ]["Sigla"].unique().tolist()
+        )
+        opcoes_om = [om for om in opcoes_om if om in candidatos]
+
+    om_sel = st.sidebar.multiselect("🏛️ OM Apoiadora", opcoes_om)
+
+    # outros filtros
+    def opts(series):
+        try:
+            return sorted(series.dropna().astype(str).unique().tolist())
+        except Exception:
+            return sorted(list({str(x) for x in series.dropna().tolist()}))
+
+    if c_dir in df.columns and not diretoria_opts:
+        dir_sel = st.sidebar.multiselect("Diretoria Responsável", opts(df[c_dir]))
+    else:
+        dir_sel = []  # já controlamos por diretoria_sel
+
+    sit_sel = st.sidebar.multiselect("📋 Situação", opts(df[c_sit]) if c_sit in df.columns else [])
+    urg_sel = st.sidebar.multiselect("⚡ Urgência", opts(df[c_urg]) if c_urg in df.columns else [])
+
+    # período por data da solicitação (ou vistoria)
+    col_data_base = c_data_solic if c_data_solic in df.columns else c_data_vist
+    if col_data_base and df[col_data_base].notna().any():
+        min_dt = pd.to_datetime(df[col_data_base].min()).date()
+        max_dt = pd.to_datetime(df[col_data_base].max()).date()
+        periodo = st.sidebar.date_input("Período (pela data da solicitação)", value=(min_dt, max_dt))
+    else:
+        periodo = None
+    sla_dias = st.sidebar.number_input("🎯 SLA (dias para 'dentro do prazo')", 1, 365, value=30)
+
+    # Aplicação de filtros
+    df_f = df.copy()
+    if diretoria_sel != "(Todas)" and c_dir in df_f.columns:
+        df_f = df_f[df_f[c_dir].astype(str) == diretoria_sel]
+    if om_sel and c_om in df_f.columns:
+        df_f = df_f[df_f[c_om].astype(str).isin(om_sel)]
+    if periodo and col_data_base:
+        ini, fim = periodo
+        df_f = df_f[(df_f[col_data_base] >= pd.to_datetime(ini)) & (df_f[col_data_base] <= pd.to_datetime(fim))]
+    if dir_sel and c_dir in df_f.columns:
+        df_f = df_f[df_f[c_dir].astype(str).isin(dir_sel)]
+    if sit_sel and c_sit in df_f.columns:
+        df_f = df_f[df_f[c_sit].astype(str).isin(sit_sel)]
+    if urg_sel and c_urg in df_f.columns:
+        df_f = df_f[df_f[c_urg].astype(str).isin(urg_sel)]
+
+    # --------- KPIs ---------
+    colk1, colk2, colk3, colk4, colk5 = st.columns(5)
+    total_vist = len(df_f)
+    finalizadas = df_f[c_sit].astype(str).str.upper().str.contains("FINALIZADA").sum() if c_sit in df_f.columns else None
+    pct_final = (finalizadas / total_vist * 100) if (finalizadas is not None and total_vist > 0) else 0
+    prazo_medio_total = df_f[c_dias_total].mean() if c_dias_total in df_f.columns else None
+    prazo_medio_exec  = df_f[c_dias_exec].mean() if c_dias_exec   in df_f.columns else None
     pct_sla = None
-    if column_mappings.get('dias_total') and total_vistorias > 0:
-        dias_numeric = pd.to_numeric(df_filtered[column_mappings['dias_total']], errors='coerce')
-        dentro_sla = (dias_numeric <= sla_dias).sum()
-        pct_sla = dentro_sla / total_vistorias * 100
+    if c_dias_total in df_f.columns and total_vist > 0:
+        dentro_sla = (df_f[c_dias_total] <= sla_dias).sum()
+        pct_sla = dentro_sla / total_vist * 100
 
-    # Renderiza KPIs
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📊 Total", f"{total_vistorias:,}".replace(",", "."))
-    
-    with col2:
-        st.metric("✅ Finalizadas", f"{finalizadas:,} ({pct_finalizadas:.1f}%)")
-    
-    with col3:
-        if prazo_medio_total is not None:
-            st.metric("⏱️ Prazo Médio", f"{prazo_medio_total:.1f} dias")
-        else:
-            st.metric("⏱️ Prazo Médio", "—")
-    
-    with col4:
-        if pct_sla is not None:
-            st.metric(f"🎯 SLA ≤{sla_dias}d", f"{pct_sla:.1f}%")
-        else:
-            st.metric(f"🎯 SLA ≤{sla_dias}d", "—")
+    with colk1: st.metric("Total de Vistorias", f"{total_vist:,}".replace(",", "."))
+    with colk2: st.metric("Finalizadas (%)", f"{pct_final:,.1f}%")
+    with colk3: st.metric("Prazo médio total (dias)", f"{prazo_medio_total:,.1f}" if prazo_medio_total is not None else "—")
+    with colk4: st.metric("Prazo médio execução (dias)", f"{prazo_medio_exec:,.1f}" if prazo_medio_exec is not None else "—")
+    with colk5: st.metric(f"% dentro do SLA (≤{sla_dias}d)", f"{pct_sla:,.1f}%" if pct_sla is not None else "—")
 
-    # Gráficos
-    st.markdown("### 📊 Análises Gráficas")
+    st.divider()
 
-    # Evolução temporal
-    if column_mappings.get('data_solicitacao') and column_mappings['data_solicitacao'] in df_filtered.columns:
-        monthly_data = (
-            df_filtered.groupby(pd.Grouper(key=column_mappings['data_solicitacao'], freq='MS'))
-            .size()
-            .reset_index(name='Vistorias')
-        )
-        
-        if not monthly_data.empty:
-            fig_evolucao = px.line(
-                monthly_data,
-                x=column_mappings['data_solicitacao'],
-                y='Vistorias',
-                markers=True,
-                title="📈 Evolução Mensal de Vistorias",
-                color_discrete_sequence=["#667eea"]
-            )
-            fig_evolucao.update_layout(height=400, template="plotly_white")
-            st.plotly_chart(fig_evolucao, use_container_width=True)
+    # --------- Gráficos ---------
+    if col_data_base and df_f[col_data_base].notna().any():
+        tmp = (df_f.groupby(pd.Grouper(key=col_data_base, freq="MS"))
+               .size().reset_index(name="Vistorias"))
+        fig1 = px.line(tmp, x=col_data_base, y="Vistorias", markers=True, title="Evolução Mensal de Vistorias")
+        st.plotly_chart(fig1, use_container_width=True)
 
-    # Gráficos lado a lado
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Distribuição por situação
-        if column_mappings.get('situacao'):
-            situacao_data = df_filtered[column_mappings['situacao']].value_counts().head(8)
-            
-            fig_sit = px.pie(
-                values=situacao_data.values,
-                names=situacao_data.index,
-                title="📋 Distribuição por Situação",
-                hole=0.4,
-                color_discrete_sequence=["#667eea", "#4ECDC4", "#FECA57", "#FF6B6B"]
-            )
-            fig_sit.update_layout(height=400)
-            st.plotly_chart(fig_sit, use_container_width=True)
+    if c_dir in df_f.columns:
+        tmp2 = df_f.groupby(c_dir, as_index=False).size().sort_values("size", ascending=False)
+        fig2 = px.bar(tmp2, x=c_dir, y="size", title="Vistorias por Diretoria Responsável")
+        st.plotly_chart(fig2, use_container_width=True)
 
-    with col2:
-        # Vistorias por diretoria
-        if column_mappings.get('diretoria'):
-            dir_data = df_filtered[column_mappings['diretoria']].value_counts().head(10)
-            
-            fig_dir = px.bar(
-                x=dir_data.values,
-                y=dir_data.index,
-                orientation='h',
-                title="🏢 Vistorias por Diretoria",
-                color=dir_data.values,
-                color_continuous_scale="Blues"
-            )
-            fig_dir.update_layout(height=400, showlegend=False, template="plotly_white")
-            st.plotly_chart(fig_dir, use_container_width=True)
+    if c_sit in df_f.columns:
+        tmp3 = df_f.groupby(c_sit, as_index=False).size()
+        fig3 = px.pie(tmp3, names=c_sit, values="size", hole=0.4, title="Distribuição por Situação")
+        st.plotly_chart(fig3, use_container_width=True)
 
-    # Detalhamento dos dados
-    st.markdown("### 📋 Detalhamento dos Dados")
-    
-    # Tabela de dados
-    df_show = df_filtered.head(100)
-    st.dataframe(df_show, use_container_width=True, height=400, hide_index=True)
+    if c_urg in df_f.columns:
+        tmp4 = df_f.groupby(c_urg, as_index=False).size().sort_values("size", ascending=False)
+        fig4 = px.bar(tmp4, x=c_urg, y="size", title="Vistorias por Classificação de Urgência")
+        st.plotly_chart(fig4, use_container_width=True)
 
-    # Downloads
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        csv_data = df_filtered.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Baixar CSV Filtrado",
-            csv_data,
-            file_name=f"cro1_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    
-    with col2:
-        # Excel
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_filtered.to_excel(writer, index=False, sheet_name="CRO1_Dados")
-        
-        st.download_button(
-            "⬇️ Baixar Excel Filtrado", 
-            output.getvalue(),
-            file_name=f"cro1_dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+    if c_dir in df_f.columns and c_dias_total in df_f.columns:
+        base = df_f.dropna(subset=[c_dir, c_dias_total]).copy()
+        base["Dentro SLA"] = base[c_dias_total] <= sla_dias
+        tmp_sla = (base.groupby(c_dir)["Dentro SLA"].mean()*100).reset_index(name="pct_sla")
+        fig_sla = px.bar(tmp_sla.sort_values("pct_sla"), x="pct_sla", y=c_dir, orientation="h",
+                         title=f"% Dentro do SLA (≤{sla_dias}d) por Diretoria",
+                         labels={"pct_sla": "% dentro do SLA"})
+        st.plotly_chart(fig_sla, use_container_width=True)
+
+    if col_data_base and c_sit in df_f.columns and df_f[col_data_base].notna().any():
+        aux = df_f.copy()
+        aux["Mes"] = aux[col_data_base].dt.to_period("M").dt.to_timestamp()
+        piv = (aux.groupby(["Mes", c_sit]).size().reset_index(name="Qtd")
+               .pivot(index="Mes", columns=c_sit, values="Qtd").fillna(0))
+        fig_hm = px.imshow(piv.T, aspect="auto",
+                           labels=dict(x="Mês", y="Situação", color="Qtd"),
+                           title="Heatmap — Mês x Situação")
+        st.plotly_chart(fig_hm, use_container_width=True)
+
+    card_title("Detalhamento (mais recentes)")
+    ord_col = col_data_base if col_data_base else (c_data_vist if c_data_vist in df_f.columns else None)
+    df_show = df_f.sort_values(ord_col, ascending=False).head(80) if ord_col else df_f.head(80)
+    st.dataframe(df_show, use_container_width=True)
