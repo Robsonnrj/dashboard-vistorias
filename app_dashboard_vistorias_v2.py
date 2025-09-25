@@ -667,3 +667,309 @@ if MENU == "📊 Dashboards":
                 df_filtered = df_filtered[df_filtered[col_name].astype(str).isin(selected_options)]
 
         # KPIs
+        st.markdown("### 📈 Indicadores Principais")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        total_vistorias = len(df_filtered)
+        
+        # Finalizadas
+        finalizadas = 0
+        pct_finalizadas = 0
+        if col_mappings.get('situacao') and col_mappings['situacao'] in df_filtered.columns:
+            finalizadas = df_filtered[col_mappings['situacao']].astype(str).str.upper().str.contains('FINALIZADA', na=False).sum()
+            pct_finalizadas = (finalizadas / total_vistorias * 100) if total_vistorias > 0 else 0
+
+        # Prazos médios
+        prazo_medio_total = None
+        prazo_medio_exec = None
+        
+        if col_mappings.get('dias_total') and col_mappings['dias_total'] in df_filtered.columns:
+            prazo_medio_total = df_filtered[col_mappings['dias_total']].mean()
+            
+        if col_mappings.get('dias_execucao') and col_mappings['dias_execucao'] in df_filtered.columns:
+            prazo_medio_exec = df_filtered[col_mappings['dias_execucao']].mean()
+
+        # SLA
+        pct_sla = None
+        if col_mappings.get('dias_total') and col_mappings['dias_total'] in df_filtered.columns and total_vistorias > 0:
+            dentro_sla = (df_filtered[col_mappings['dias_total']] <= sla_dias).sum()
+            pct_sla = dentro_sla / total_vistorias * 100
+
+        with col1:
+            st.metric("📊 Total Vistorias", f"{total_vistorias:,}".replace(",", "."))
+        
+        with col2:
+            st.metric("✅ Finalizadas", f"{finalizadas:,} ({pct_finalizadas:.1f}%)")
+        
+        with col3:
+            st.metric("⏱️ Prazo Médio Total", f"{prazo_medio_total:.1f} dias" if prazo_medio_total is not None else "—")
+        
+        with col4:
+            st.metric("🚀 Prazo Médio Exec.", f"{prazo_medio_exec:.1f} dias" if prazo_medio_exec is not None else "—")
+        
+        with col5:
+            st.metric(f"🎯 SLA ≤{sla_dias}d", f"{pct_sla:.1f}%" if pct_sla is not None else "—")
+
+        # Indicador de filtros aplicados
+        if oms_selecionadas or diretorias_selecionadas or any(filtros.values()) or (periodo and len(periodo) == 2):
+            filtros_ativos = []
+            if oms_selecionadas:
+                filtros_ativos.append(f"{len(oms_selecionadas)} OM(s)")
+            if diretorias_selecionadas:
+                filtros_ativos.append(f"{len(diretorias_selecionadas)} Diretoria(s)")
+            if any(filtros.values()):
+                filtros_ativos.extend([f"{len(v)} {k}" for k, v in filtros.items() if v])
+            
+            st.info(f"🔍 **Filtros aplicados:** {', '.join(filtros_ativos)}")
+
+        st.markdown("---")
+
+        # Gráficos
+        st.markdown("### 📊 Análises Gráficas")
+        
+        # Evolução temporal
+        if col_data_base and col_data_base in df_filtered.columns and df_filtered[col_data_base].notna().any():
+            monthly_data = (
+                df_filtered.groupby(pd.Grouper(key=col_data_base, freq='MS'))
+                .size()
+                .reset_index(name='Vistorias')
+            )
+            
+            fig_evolucao = px.line(
+                monthly_data,
+                x=col_data_base,
+                y='Vistorias',
+                markers=True,
+                title="📈 Evolução Mensal de Vistorias",
+                template="plotly_white"
+            )
+            fig_evolucao.update_layout(height=400)
+            st.plotly_chart(fig_evolucao, use_container_width=True)
+
+        # 1. Vistorias por Diretoria
+        col_diretoria = col_mappings.get('diretoria')
+        if col_diretoria and col_diretoria in df_filtered.columns:
+            diretoria_data = (
+                df_filtered[col_diretoria]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'count': 'Quantidade'}) 
+                .sort_values('Quantidade', ascending=True)
+            )
+            
+            if not diretoria_data.empty:
+                fig_dir = px.bar(
+                    diretoria_data,
+                    x='Quantidade',
+                    y=col_diretoria,
+                    orientation='h',
+                    title="🏢 Vistorias por Diretoria Responsável",
+                    template="plotly_white",
+                    color='Quantidade',
+                    color_continuous_scale='Blues'
+                )
+                fig_dir.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig_dir, use_container_width=True)
+
+        # 2. Distribuição por Situação (PIE CHART)
+        col_situacao = col_mappings.get('situacao')
+        if col_situacao and col_situacao in df_filtered.columns:
+            situacao_data = (
+                df_filtered[col_situacao]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'count': 'Quantidade'})
+            )
+            
+            if not situacao_data.empty:
+                colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57', '#FF9FF3', '#54A0FF']
+                
+                fig_sit = px.pie(
+                    situacao_data,
+                    names=col_situacao,
+                    values='Quantidade',
+                    title="📋 Distribuição por Situação",
+                    hole=0.4,
+                    color_discrete_sequence=colors
+                )
+                fig_sit.update_traces(
+                    textposition='inside',
+                    textinfo='percent+label',
+                    hovertemplate='<b>%{label}</b><br>Quantidade: %{value}<br>Percentual: %{percent}<extra></extra>'
+                )
+                fig_sit.update_layout(height=400)
+                st.plotly_chart(fig_sit, use_container_width=True)
+            else:
+                st.warning("⚠️ Não há dados de situação para exibir no gráfico.")
+        
+        # 3. Vistorias por Urgência
+        col_urgencia = col_mappings.get('urgencia')
+        if col_urgencia and col_urgencia in df_filtered.columns:
+            urgencia_data = (
+                df_filtered[col_urgencia]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'count': 'Quantidade'})
+                .sort_values('Quantidade', ascending=False)
+            )
+            
+            if not urgencia_data.empty:
+                fig_urg = px.bar(
+                    urgencia_data,
+                    x=col_urgencia,
+                    y='Quantidade',
+                    title="⚡ Vistorias por Classificação de Urgência",
+                    template="plotly_white",
+                    color='Quantidade',
+                    color_continuous_scale='Reds'
+                )
+                fig_urg.update_layout(height=400, showlegend=False)
+                fig_urg.update_xaxes(tickangle=45)
+                st.plotly_chart(fig_urg, use_container_width=True)
+
+        # 4. NOVO: Gráfico específico de OMs (quando filtradas)
+        if oms_selecionadas and col_om and col_om in df_filtered.columns:
+            om_data = (
+                df_filtered[col_om]
+                .dropna()
+                .value_counts()
+                .reset_index()
+                .rename(columns={'count': 'Quantidade'})
+                .sort_values('Quantidade', ascending=True)
+            )
+            
+            if not om_data.empty:
+                fig_om = px.bar(
+                    om_data,
+                    x='Quantidade',
+                    y=col_om,
+                    orientation='h',
+                    title=f"🏛️ Vistorias por OM Selecionada ({len(oms_selecionadas)} filtradas)",
+                    template="plotly_white",
+                    color='Quantidade',
+                    color_continuous_scale='Greens'
+                )
+                fig_om.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig_om, use_container_width=True)
+
+        # Heatmap temporal por situação
+        if (col_data_base and col_data_base in df_filtered.columns and
+            col_situacao and col_situacao in df_filtered.columns and
+            df_filtered[col_data_base].notna().any()):
+            
+            df_heatmap = df_filtered[[col_data_base, col_situacao]].dropna()
+            df_heatmap['Mes'] = df_heatmap[col_data_base].dt.to_period('M').dt.to_timestamp()
+            
+            heatmap_data = (
+                df_heatmap.groupby(['Mes', col_situacao])
+                .size()
+                .reset_index(name='Quantidade')
+                .pivot(index=col_situacao, columns='Mes', values='Quantidade')
+                .fillna(0)
+            )
+            
+            if not heatmap_data.empty and heatmap_data.shape[0] > 0 and heatmap_data.shape[1] > 0:
+                fig_heatmap = px.imshow(
+                    heatmap_data,
+                    aspect="auto",
+                    title="🔥 Heatmap - Situação por Mês",
+                    labels=dict(x="Mês", y="Situação", color="Quantidade"),
+                    color_continuous_scale="YlOrRd"
+                )
+                fig_heatmap.update_layout(height=400)
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+
+        # SLA por Diretoria
+        col_dias_total = col_mappings.get('dias_total')
+        if (col_diretoria and col_diretoria in df_filtered.columns and
+            col_dias_total and col_dias_total in df_filtered.columns):
+            
+            sla_data = df_filtered.dropna(subset=[col_diretoria, col_dias_total]).copy()
+            sla_data['Dentro_SLA'] = sla_data[col_dias_total] <= sla_dias
+            sla_summary = (
+                sla_data.groupby(col_diretoria)['Dentro_SLA']
+                .mean() * 100
+            ).reset_index(name='pct_sla').sort_values('pct_sla')
+            
+            if not sla_summary.empty:
+                fig_sla = px.bar(
+                    sla_summary,
+                    x='pct_sla',
+                    y=col_diretoria,
+                    orientation='h',
+                    title=f"🎯 % Dentro do SLA (≤{sla_dias} dias) por Diretoria",
+                    labels={'pct_sla': '% dentro do SLA'},
+                    template="plotly_white",
+                    color='pct_sla',
+                    color_continuous_scale='RdYlGn'
+                )
+                fig_sla.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig_sla, use_container_width=True)
+
+        # Detalhamento dos dados
+        st.markdown("### 📋 Detalhamento dos Dados")
+        
+        # Informações sobre os dados exibidos
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📊 Registros Exibidos", f"{min(100, len(df_filtered))}")
+        with col2:
+            st.metric("📈 Total Filtrados", f"{len(df_filtered)}")
+        with col3:
+            pct_filtrado = (len(df_filtered) / len(df) * 100) if len(df) > 0 else 0
+            st.metric("📊 % do Total", f"{pct_filtrado:.1f}%")
+        
+        if col_data_base and col_data_base in df_filtered.columns:
+            df_show = df_filtered.sort_values(col_data_base, ascending=False).head(100)
+        else:
+            df_show = df_filtered.head(100)
+        
+        st.dataframe(df_show, use_container_width=True, height=400, hide_index=True)
+        
+        # Download dos dados filtrados
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            csv_filtered = df_filtered.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Baixar Dados Filtrados (CSV)",
+                csv_filtered,
+                file_name=f"{base_tab}_filtrado_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with col2:
+            # Download Excel dos dados filtrados
+            output_filtered = io.BytesIO()
+            with pd.ExcelWriter(output_filtered, engine='openpyxl') as writer:
+                df_filtered.to_excel(writer, index=False, sheet_name="Dados_Filtrados")
+            
+            st.download_button(
+                "⬇️ Baixar Dados Filtrados (Excel)",
+                output_filtered.getvalue(),
+                file_name=f"{base_tab}_filtrado_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar dashboards: {e}")
+        st.exception(e)
+
+# =========================================================
+# RODAPÉ
+# =========================================================
+
+st.markdown("---")
+st.markdown(
+    "<div style='text-align: center; color: #666; font-size: 12px;'>"
+    "🚀 CRO1 Sistema - Versão Otimizada com Filtro Dinâmico de OMs • "
+    f"Última atualização: {datetime.now().strftime('%d/%m/%Y às %H:%M')}"
+    "</div>",
+    unsafe_allow_html=True
+)
