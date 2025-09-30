@@ -15,8 +15,9 @@ STATUS = [
 
 def page():
     st.header("🔁 VIS-003 — Controle de Status e Auditoria")
-
-    df = read_df("solicitacoes")
+    
+    tab_val = st.session_state["tabs_map"]["validacao"]
+    df_oms = read_df(tab_val)
     if df.empty:
         st.info("Ainda não existem solicitações.")
         return
