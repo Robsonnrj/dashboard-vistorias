@@ -95,6 +95,12 @@ def append_row(tab_name: str, row: dict):
         read_df.clear()
     except Exception:
         pass
+ def clear_caches():
+     """ Limpa somente os caches deste modulo."""
+     try:
+         read_DF.clear()
+     except Exception:
+         pass
 
 # Alias para compatibilidade com nomes antigos:
 overwrite_tab = overwrite_tab_from_df
