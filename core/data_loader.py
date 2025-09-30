@@ -1,5 +1,5 @@
 # core/data_loader.py
-from _future_ import annotations
+from __future__ import annotations
 import unicodedata
 import pandas as pd
 import gspread
