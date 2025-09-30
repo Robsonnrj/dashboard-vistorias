@@ -1,10 +1,11 @@
-streamlit==1.37.1
-streamlit-option-menu==0.3.6
+streamlit==1.38.0
+streamlit-option-menu==0.3.12
 pandas==2.2.2
 plotly==5.24.1
-gspread==6.1.2
+gspread==6.1.4
 google-auth==2.35.0
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
 openpyxl==3.1.5
-
+puthon-dateutil==2.9.0.post0
+reportlab==4.2.2
