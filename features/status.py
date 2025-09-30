@@ -15,7 +15,11 @@ STATUS = [
 
 def page():
     st.header("🔁 VIS-003 — Controle de Status e Auditoria")
-    
+    tab_base = st.session_state["tabs_map"]["solicitacoes"]
+    df = read_df(tab_base)          
+    if df.empty:
+        st.info("Sem dados para auditoria.")
+        return
     tab_val = st.session_state["tabs_map"]["validacao"]
     df_oms = read_df(tab_val)
     if df.empty:
