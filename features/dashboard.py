@@ -2,7 +2,7 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from ..core.data_loader import read_df
+from core.data_loader import read_df
 
 def _kpi_block(label: str, value: str, sub: str):
     st.markdown(
