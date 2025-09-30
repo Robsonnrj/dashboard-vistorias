@@ -26,7 +26,7 @@ def _optional_col(df, candidates):
 
 def page():
     st.header("📊 Dashboard Operacional — Seção de Vistorias")
-
+    tab_base = st.session_state["tabs_map"]["solicitacoes]
     df = read_df("solicitacoes")
     if df.empty:
         st.info("Sem dados ainda.")
