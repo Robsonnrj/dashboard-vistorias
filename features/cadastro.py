@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 from datetime import datetime
-from ..core.models import SolicitacaoVistoria
-from ..core.data_loader import append_row
-from ..core.config import has_gsheets
+from core.models import SolicitacaoVistoria
+from core.data_loader import append_row
+from core.config import has_gsheets
 
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
