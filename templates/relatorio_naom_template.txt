@@ -1,0 +1,2 @@
+RELATÓRIO NAOM — MODELO
+(este arquivo é apenas informativo; o PDF é renderizado por reportlab no código)
