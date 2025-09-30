@@ -10,3 +10,4 @@ streamlit-option-menu>=0.3
 # para PDF
 reportlab>=3.6,<4
 pillow>=10,<11
+reportlab>=4.0
