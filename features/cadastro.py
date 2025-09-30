@@ -1,13 +1,14 @@
 # features/cadastro.py
 # -*- coding: utf-8 -*-
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, date
 import pandas as pd
+
 from core.data_loader import append_row, read_df
 
 
-def _input_row():
-    """Coleta os campos do formulário e devolve um dicionário pronto para gravar."""
+def _input_row() -> tuple[dict, bool]:
+    """Coleta os campos do formulário e devolve (linha, valido)."""
     st.subheader("📥 Nova solicitação de vistoria")
     col1, col2 = st.columns(2)
 
@@ -22,7 +23,12 @@ def _input_row():
 
     with col2:
         local = st.text_input("Local / instalação")
-        urgencia = st.selectbox("Urgência", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
+        urgencia = st.selectbox(
+            "Urgência",
+            ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"],
+            index=0,
+        )
+        # Streamlit aceita value=None; garantimos o tipo depois
         data_limite = st.date_input("Data limite (se houver)", value=None)
 
     motivo = st.text_area("Motivo / justificativa (NAOM)", height=120)
@@ -37,7 +43,13 @@ def _input_row():
         erros.append("Descreva o **motivo/justificativa**.")
 
     if erros:
-        st.warning("• " + "\n• ".join(erros))
+        st.warning("• " + "<br>• ".join(erros), unsafe_allow_html=True)
+
+    # Normaliza a data_limite para string ISO (ou vazio)
+    if isinstance(data_limite, (date,)):
+        data_limite_str = data_limite.strftime("%Y-%m-%d")
+    else:
+        data_limite_str = ""
 
     row = {
         "numero": "",  # será atribuído ao salvar (sequencial)
@@ -47,7 +59,7 @@ def _input_row():
         "tipo_vistoria": tipo_vistoria,
         "local": local.strip(),
         "urgencia": urgencia,
-        "data_limite": data_limite.strftime("%Y-%m-%d") if data_limite else "",
+        "data_limite": data_limite_str,
         "motivo": motivo.strip(),
         "status_atual": "SOLICITADA",
     }
@@ -71,18 +83,14 @@ def page():
     row, ok = _input_row()
 
     # Salvar
-    if st.button("💾 Salvar solicitação", disabled=not ok):
+    if st.button("💾 Salvar solicitação", type="primary", disabled=not ok):
         try:
-            # Gera número sequencial simples baseado na quantidade atual
+            # Gera número sequencial: maior número existente + 1
             proximo = 1
             if not df_existente.empty and "numero" in df_existente.columns:
-                try:
-                    # tenta converter para inteiro ignorando vazios
-                    nums = pd.to_numeric(df_existente["numero"], errors="coerce").dropna()
-                    if not nums.empty:
-                        proximo = int(nums.max()) + 1
-                except Exception:
-                    pass
+                nums = pd.to_numeric(df_existente["numero"], errors="coerce").dropna()
+                if not nums.empty:
+                    proximo = int(nums.max()) + 1
             row["numero"] = str(proximo)
 
             append_row(tab_solic, row)
@@ -91,15 +99,18 @@ def page():
         except Exception as e:
             st.error(f"Falha ao salvar: {e}")
 
+    # Lista das últimas solicitações
     st.divider()
     st.subheader("📄 Últimas solicitações")
+
     if not df_existente.empty:
-        # Ordena por data se existir
+        # Tenta ordenar por uma coluna de data (qualquer coluna que contenha 'data')
         c_data = None
         for c in df_existente.columns:
             if "data" in c.lower():
                 c_data = c
                 break
+
         if c_data:
             df_existente[c_data] = pd.to_datetime(df_existente[c_data], errors="coerce")
             df_existente = df_existente.sort_values(c_data, ascending=False)
