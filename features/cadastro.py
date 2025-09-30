@@ -96,19 +96,25 @@ def _input_row(oms_df: pd.DataFrame) -> tuple[dict, bool]:
     options = []
     display_to_sigla = {}
     for _, r in oms_df.iterrows():
-        sig = str(r.get("om_sigla", "") or "").strip()
-        nom = str(r.get("om_nome", "") or "").strip()
-        dir_ = str(r.get("diretoria", "") or "").strip()
-        if not sig:
-            continue
-        label = sig
-        if nom:
-            label += f" — {nom}"
-        if dir_:
-            label += f"  ({dir_})"
-        options.append(label)
-        display_to_sigla[label] = sig
+    sig = r.get("om_sigla", "")
+    nom = r.get("om_nome", "")
+    dir_ = r.get("diretoria", "")
 
+    sig = "" if pd.isna(sig) else str(sig).strip()
+    nom = "" if pd.isna(nom) else str(nom).strip()
+    dir_ = "" if pd.isna(dir_) else str(dir_).strip()
+
+    if not sig:
+        continue
+
+    label = sig
+    if nom:
+        label += f" — {nom}"
+    if dir_:
+        label += f"  ({dir_})"
+
+    options.append(label)
+    display_to_sigla[label] = sig
     with col1:
         om_label = st.selectbox(
             "Organização Militar (OM)",
