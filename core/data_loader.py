@@ -1,10 +1,35 @@
-# -*- coding: utf-8 -*-
-import gspread
+# core/data_loader.py
+from _future_ import annotations
+import unicodedata
 import pandas as pd
+import gspread
 from google.oauth2.service_account import Credentials
 import streamlit as st
 
-from .config import SCOPES, SHEET_TABS, has_gsheets
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+def _norm(s: str) -> str:
+    s = str(s)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return s.lower().strip()
+
+def _make_unique_headers(raw_headers):
+    out, seen = [], {}
+    for j, h in enumerate(raw_headers, start=1):
+        h = (h or "").strip()
+        if not h:
+            h = f"col_{j}"
+        base = h
+        if base in seen:
+            seen[base] += 1
+            h = f"{base}_{seen[base]}"
+        else:
+            seen[base] = 1
+        out.append(h)
+    return out
 
 @st.cache_resource(show_spinner=False)
 def _client():
@@ -16,48 +41,73 @@ def _client():
 def _book():
     return _client().open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
 
-def _ensure_ws(title: str, header: list[str]):
+def _read_ws_loose(ws, header_row=None) -> pd.DataFrame:
+    """Lê tolerando cabeçalho repetido/mesclado/vazio e gera nomes únicos."""
+    values = ws.get_all_values()
+    if not values:
+        return pd.DataFrame()
+
+    # acha a linha do cabeçalho
+    if header_row is None:
+        hdr_idx = next((i for i, row in enumerate(values) if any(str(c).strip() for c in row)), 0)
+    else:
+        hdr_idx = max(0, int(header_row) - 1)
+
+    headers = _make_unique_headers(values[hdr_idx])
+    body = values[hdr_idx + 1:]
+
+    # remove linhas finais totalmente vazias
+    while body and not any(str(c).strip() for c in body[-1]):
+        body.pop()
+
+    df = pd.DataFrame(body, columns=headers).replace("", pd.NA)
+    # tenta converter datas
+    for c in df.columns:
+        if "DATA" in c.upper():
+            df[c] = pd.to_datetime(df[c], errors="coerce")
+    return df
+
+def _ensure_ws(title: str, _headers_for: list[str] | None = None):
+    """
+    Garante que a worksheet exista.
+    Se não houver, cria (com headers se fornecidos). Não exige cabeçalho igual para ler.
+    """
     sh = _book()
     try:
         ws = sh.worksheet(title)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=title, rows=2000, cols=max(10, len(header)))
-        ws.update("1:1", [header])
         return ws
-    # garante cabeçalho
-    if ws.row_values(1) != header:
-        ws.update("1:1", [header])
-    return ws
+    except gspread.WorksheetNotFound:
+        rows = 2000
+        cols = max(10, len(_headers_for or []))
+        ws = sh.add_worksheet(title=title, rows=rows, cols=cols)
+        if _headers_for:
+            ws.update("1:1", [_headers_for])
+        return ws
 
-# ---------- CRUD ----------
-def read_df(tab_key: str) -> pd.DataFrame:
-    title = SHEET_TABS[tab_key]
-    ws = _ensure_ws(title, _headers_for(tab_key))
-    rows = ws.get_all_records()
-    return pd.DataFrame(rows)
+@st.cache_data(ttl=120, show_spinner=False)
+def read_df(title: str, _headers_for: list[str] | None = None) -> pd.DataFrame:
+    """
+    Lê uma aba por título, criando caso não exista. Tolerante a cabeçalho fora do padrão.
+    """
+    try:
+        ws = _ensure_ws(title, _headers_for=_headers_for)
+        return _read_ws_loose(ws)
+    except gspread.exceptions.APIError as e:
+        # Mensagem amigável
+        raise RuntimeError(
+            "Falha ao acessar a planilha no Google Sheets.\n"
+            "Verifique:\n"
+            "• A URL em [gsheets.spreadsheet_url] no secrets.toml está correta;\n"
+            "• A planilha foi compartilhada com o e-mail da service account (st.secrets['gcp_service_account']['client_email']) com permissão de EDITOR;\n"
+            f"• A aba '{title}' existe (ou será criada) e não está protegida.\n\n"
+            f"Detalhe técnico: {e}"
+        )
 
-def append_row(tab_key: str, row_dict: dict):
-    title = SHEET_TABS[tab_key]
-    ws = _ensure_ws(title, _headers_for(tab_key))
-    row = [row_dict.get(h, "") for h in _headers_for(tab_key)]
-    ws.append_row(row, value_input_option="USER_ENTERED")
-
-def overwrite_tab(tab_key: str, df: pd.DataFrame):
-    title = SHEET_TABS[tab_key]
-    ws = _ensure_ws(title, list(df.columns))
+def write_df(title: str, df: pd.DataFrame, keep_header=True):
+    """Sobrescreve a aba com o DataFrame."""
+    ws = _ensure_ws(title, _headers_for=list(df.columns) if keep_header else None)
     ws.clear()
-    ws.update("A1", [list(df.columns)] + df.fillna("").astype(str).values.tolist(),
-              value_input_option="USER_ENTERED")
-
-def _headers_for(tab_key: str) -> list[str]:
-    if tab_key == "solicitacoes":
-        return [
-            "numero","om_solicitante","om_nome","diretoria","local","coordenadas",
-            "tipo_vistoria","motivo","urgencia","data_limite","anexos",
-            "status_atual","criado_por","criado_em"
-        ]
-    if tab_key == "historicos":
-        return ["numero","status_de","status_para","justificativa","responsavel","timestamp"]
-    if tab_key == "relatorios":
-        return ["numero","titulo","arquivo_pdf","gerado_por","gerado_em"]
-    return []
+    values = [list(map(str, df.columns))] + df.fillna("").astype(str).values.tolist() if keep_header \
+             else df.fillna("").astype(str).values.tolist()
+    ws.update("A1", values, value_input_option="USER_ENTERED")
+    read_df.clear()
