@@ -85,4 +85,8 @@ def page():
     if c_data and c_data in dff.columns:
     dff[c_data] = pd.to_datetime(dff[c_data], errors="coerce")
     dff = dff.sort_values(c_data, ascending=False)
+    # Remove colunas duplicadas mantendo só a primeira
+    dff = dff.loc[:, ~dff.columns.duplicated()]
     st.dataframe(dff.head(50), use_container_width=True, height=360)
+
+
