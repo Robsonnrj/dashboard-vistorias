@@ -1,10 +1,8 @@
 # features/cadastro.py
 # -*- coding: utf-8 -*-
-
 import streamlit as st
 from datetime import datetime
 import pandas as pd
-
 from core.data_loader import append_row, read_df
 
 
