@@ -5,8 +5,8 @@ import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-from ..core.data_loader import read_df, append_row
-from ..core.models import RegistroRelatorio
+from core.data_loader import read_df, append_row
+from core.models import RegistroRelatorio
 
 def _render_pdf_buffer(dados: dict) -> bytes:
     # PDF mínimo (padrão NAOM simplificado)
