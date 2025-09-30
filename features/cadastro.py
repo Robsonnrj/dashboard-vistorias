@@ -191,7 +191,13 @@ def page():
     row, ok = _input_row(oms_df)
 
     # Salvar
-    if st.button("💾 Salvar solicitação", type="primary", disabled=not ok):
+row, ok = _input_row(oms_df)
+
+# Salvar (sem desabilitar o botão — validamos por dentro)
+if st.button("💾 Salvar solicitação", type="primary"):
+    if not ok:
+        st.warning("⚠️ Preencha os campos obrigatórios antes de salvar.")
+    else:
         try:
             # número sequencial simples
             proximo = 1
@@ -209,6 +215,7 @@ def page():
             st.rerun()
         except Exception as e:
             st.error(f"Falha ao salvar: {e}")
+
 
     st.divider()
     st.subheader("📄 Últimas solicitações")
