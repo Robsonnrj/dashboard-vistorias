@@ -148,12 +148,8 @@ def _input_row(oms_df: pd.DataFrame) -> tuple[dict, bool]:
         erros.append("Descreva o **motivo/justificativa**.")
 
     if erros:
-        st.markdown(
-            "<div style='border:1px solid #fde68a;background:#fef9c3;padding:10px;border-radius:8px'>"
-            "<b>⚠️ Corrija os campos:</b><br>• " + "<br>• ".join(erros) +
-            "</div>",
-            unsafe_allow_html=True,
-        )
+         st.warning("⚠️ Corrija os campos:\n• " + "\n• ".join(erros))
+    
 
     row = {
         # campos operacionais próprios do sistema
