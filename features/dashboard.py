@@ -83,7 +83,6 @@ def page():
 
     st.subheader("Últimos registros")
     if c_data and c_data in dff.columns:
-    col_to_use = dff[c_data].iloc[:,0] if isinstance(dff[c_data], pd.DataFrame) else dff[c_data]
-    dff[c_data] = pd.to_datetime(col_to_use, errors="coerce")
+    dff[c_data] = pd.to_datetime(dff[c_data], errors="coerce")
     dff = dff.sort_values(c_data, ascending=False)
     st.dataframe(dff.head(50), use_container_width=True, height=360)
