@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
-from ..core.data_loader import read_df
-from ..core.audit import atualizar_status, trilha
+from core.data_loader import read_df
+from core.audit import atualizar_status, trilha
 
 STATUS = [
     "SOLICITADA",
