@@ -89,4 +89,4 @@ overwrite_tab = overwrite_tab_from_df
 # Opcional, ajuda a evitar import errors “fantasmas”
 __all__ = ["read_df", "append_row", "overwrite_tab_from_df", "overwrite_tab"]
 
-@st.cache_data(ttl=300, show_spinner=False)
+
