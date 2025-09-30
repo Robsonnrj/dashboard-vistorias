@@ -4,6 +4,8 @@ from streamlit_option_menu import option_menu
 
 from core.config import has_gsheets
 from features import cadastro, status, relatorios, dashboard
+from core.data_loader import clear_caches
+
 
 st.set_page_config(page_title="CRO1 — Seção de Vistorias", layout="wide")
 
@@ -65,12 +67,11 @@ with st.sidebar.expander("⚙️ Abas usadas pelo sistema", expanded=False):
         key="tab_audit"
     )
 
-    if st.button("🔁 Atualizar dados (limpar cache)"):
-        from core.data_loader import read_df
-        read_df.clear()
+   
+    if st.button("🔄 Atualizar dados (limpar cache)"):
+        clear_caches()
         st.toast("Cache limpo. Recarregando…")
-        st.rerun()    
-
+        st.rerun()
 if MENU == "📊 Dashboard":
     dashboard.page()
 elif MENU == "📝 Cadastro":
