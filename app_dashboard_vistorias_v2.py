@@ -30,6 +30,46 @@ with st.sidebar:
             "nav-link-selected": {"background-color":"#f3f4f6"},
         }
     )
+# mapeamento de abas (fica salvo na sessão)
+default_tabs = {
+    "solicitacoes": "ACOMPANHAMENTO VISTORIAS",   # fonte dos dashboards/solicitações
+    "validacao":    "Validacao_de_Dados",         # lista oficial de OMs
+    "auditoria":    "Auditoria_Vistorias",        # se você tiver essa aba
+}
+
+if "tabs_map" not in st.session_state:
+    st.session_state["tabs_map"] = default_tabs.copy()
+
+with st.sidebar.expander("⚙️ Abas usadas pelo sistema", expanded=False):
+    # lista todas as abas do arquivo para facilitar
+    try:
+        all_tabs = [ws.title for ws in core.data_loader._book().worksheets()]
+    except Exception:
+        all_tabs = []
+    st.session_state["tabs_map"]["solicitacoes"] = st.selectbox(
+        "Aba de Solicitações / Base dos Dashboards",
+        options=all_tabs or [default_tabs["solicitacoes"]],
+        index=(all_tabs.index(default_tabs["solicitacoes"]) if default_tabs["solicitacoes"] in all_tabs else 0),
+        key="tab_solic"
+    )
+    st.session_state["tabs_map"]["validacao"] = st.selectbox(
+        "Aba de Validação (OMs oficiais)",
+        options=all_tabs or [default_tabs["validacao"]],
+        index=(all_tabs.index(default_tabs["validacao"]) if default_tabs["validacao"] in all_tabs else 0),
+        key="tab_valid"
+    )
+    st.session_state["tabs_map"]["auditoria"] = st.selectbox(
+        "Aba de Auditoria (opcional)",
+        options=["(não usar)"] + (all_tabs or []),
+        index=0,
+        key="tab_audit"
+    )
+
+    if st.button("🔁 Atualizar dados (limpar cache)"):
+        from core.data_loader import read_df
+        read_df.clear()
+        st.toast("Cache limpo. Recarregando…")
+        st.experimental_rerun()    
 
 if MENU == "📊 Dashboard":
     dashboard.page()
