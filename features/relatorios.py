@@ -1,69 +1,73 @@
-# -*- coding: utf-8 -*-
-import io
-from datetime import datetime
+# features/relatorios.py
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    HAVE_REPORTLAB = True
+except ImportError:
+    HAVE_REPORTLAB = False
+
 import streamlit as st
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
+import pandas as pd
+from core.data_loader import read_df
 
-from core.data_loader import read_df, append_row
-from core.models import RegistroRelatorio
-
-def _render_pdf_buffer(dados: dict) -> bytes:
-    # PDF mínimo (padrão NAOM simplificado)
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
+def gerar_pdf_relatorio_naom(dados_relatorio: dict, caminho_pdf: str):
+    if not HAVE_REPORTLAB:
+        raise RuntimeError(
+            "O módulo 'reportlab' não está instalado. "
+            "Adicione 'reportlab' ao requirements.txt e reimplante."
+        )
+    c = canvas.Canvas(caminho_pdf, pagesize=A4)
     w, h = A4
 
+    # Cabeçalho simples — substitua pelo seu template NAOM
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(40, h-50, "Relatório de Vistoria — Padrão NAOM")
+    c.drawString(25*mm, h - 25*mm, "Relatório de Vistoria - NAOM")
     c.setFont("Helvetica", 10)
-    y = h-90
-    for k, v in dados.items():
-        c.drawString(40, y, f"{k}: {v}")
-        y -= 16
-        if y < 80:
+    y = h - 35*mm
+    for k, v in dados_relatorio.items():
+        c.drawString(25*mm, y, f"{k}: {v}")
+        y -= 6*mm
+        if y < 20*mm:
             c.showPage()
-            y = h-60
+            y = h - 25*mm
     c.showPage()
     c.save()
-    return buf.getvalue()
 
-def page():
-    st.header("📄 VIS-005 — Geração de Relatório (NAOM)")
+def ui_relatorios():
+    st.header("🧾 Relatórios de Vistoria (NAOM)")
+    if not HAVE_REPORTLAB:
+        st.warning("Pacote 'reportlab' ausente. Adicione ao requirements.txt para habilitar o PDF.")
+        st.stop()
 
-    df = read_df("solicitacoes")
-    if df.empty:
-        st.info("Sem solicitações para gerar relatório.")
-        return
+    # Exemplo mínimo de interface
+    col1, col2 = st.columns(2)
+    with col1:
+        numero = st.text_input("Número do Relatório NAOM")
+        om = st.text_input("OM")
+        fiscal = st.text_input("Fiscal Responsável")
+        data = st.date_input("Data do Relatório")
+    with col2:
+        objetivo = st.text_area("Objetivo")
+        conclusoes = st.text_area("Conclusões")
+        recomendacoes = st.text_area("Recomendações")
 
-    numero = st.selectbox("Solicitação", df["numero"].tolist())
-    titulo = st.text_input("Título do Relatório", value=f"Relatório de Vistoria {numero}")
-    gerado_por = st.text_input("Assinatura/Responsável", value="Engº Militar")
-    gerar = st.button("Gerar PDF")
-
-    if gerar:
-        reg = df[df["numero"] == numero].iloc[0].to_dict()
-        dados = {
+    if st.button("Gerar PDF"):
+        info = {
             "Número": numero,
-            "Título": titulo,
-            "OM": f'{reg.get("om_solicitante","")} — {reg.get("om_nome","")}',
-            "Diretoria": reg.get("diretoria",""),
-            "Local": reg.get("local",""),
-            "Tipo de Vistoria": reg.get("tipo_vistoria",""),
-            "Urgência": reg.get("urgencia",""),
-            "Motivo": reg.get("motivo",""),
-            "Data Limite": reg.get("data_limite",""),
-            "Gerado por": gerado_por,
-            "Gerado em": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "OM": om,
+            "Fiscal": fiscal,
+            "Data": str(data),
+            "Objetivo": objetivo,
+            "Conclusões": conclusoes,
+            "Recomendações": recomendacoes,
         }
-
-        pdf_bytes = _render_pdf_buffer(dados)
-        nome_pdf = f"Relatorio_{numero.replace('/','_')}.pdf"
-
-        # salva metadado na aba Relatorios
-        append_row("relatorios", RegistroRelatorio(
-            numero=numero, titulo=titulo, arquivo_pdf=nome_pdf, gerado_por=gerado_por
-        ).to_row())
-
-        st.success("Relatório gerado.")
-        st.download_button("⬇️ Baixar PDF", data=pdf_bytes, file_name=nome_pdf, mime="application/pdf")
+        caminho = "relatorio_vistoria_naom.pdf"
+        try:
+            gerar_pdf_relatorio_naom(info, caminho)
+            with open(caminho, "rb") as f:
+                st.download_button("⬇️ Baixar PDF", f, file_name=caminho, mime="application/pdf")
+            st.success("PDF gerado com sucesso.")
+        except Exception as e:
+            st.error(f"Falha ao gerar PDF: {e}")
