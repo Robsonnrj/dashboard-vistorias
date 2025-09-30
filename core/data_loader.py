@@ -9,7 +9,20 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-
+def _make_unique_headers(headers: list[str]) -> list[str]:
+    seen = {}
+    result = []
+    for h in headers:
+        h = (h or "").strip()
+        if not h:
+            h = "col"
+        if h in seen:
+            seen[h] += 1
+            h = f"{h}_{seen[h]}"
+        else:
+            seen[h] = 1
+        result.append(h)
+    return result
 def has_gsheets() -> bool:
     return ("gcp_service_account" in st.secrets
             and "gsheets" in st.secrets
