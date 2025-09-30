@@ -69,7 +69,7 @@ with st.sidebar.expander("⚙️ Abas usadas pelo sistema", expanded=False):
         from core.data_loader import read_df
         read_df.clear()
         st.toast("Cache limpo. Recarregando…")
-        st.experimental_rerun()    
+        st.rerun()    
 
 if MENU == "📊 Dashboard":
     dashboard.page()
