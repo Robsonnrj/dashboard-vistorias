@@ -36,26 +36,57 @@ def _ensure_ws(title: str, header: list[str]):
     if ws.row_values(1) != header:
         ws.update("1:1", [header])
     return ws
-
-@st.cache_data(ttl=300, show_spinner=False)
 def read_df(tab_name: str) -> pd.DataFrame:
-    """Lê a aba inteira a partir da linha 1 como cabeçalho (tolerante a vazios)."""
+    """Lê uma aba do Sheets como DataFrame."""
     ws = _book().worksheet(tab_name)
+    # use sua função de leitura tolerante, por ex. read_ws_loose(ws)
     values = ws.get_all_values()
     if not values:
         return pd.DataFrame()
-    header = values[0] if values else []
-    data = values[1:] if len(values) > 1 else []
-    df = pd.DataFrame(data, columns=header).replace("", pd.NA)
-    # normaliza datas
-    for c in df.columns:
-        if "DATA" in c.upper():
-            df[c] = pd.to_datetime(df[c], errors="coerce")
+    df = pd.DataFrame(values[1:], columns=values[0]).replace("", pd.NA)
+    # normalização de datas opcional…
     return df
 
-def append_row(tab_name: str, header: list[str], row_dict: dict):
-    """Inclui uma linha na aba; cria aba/cabeçalho se necessário."""
-    ws = _ensure_ws(tab_name, header)
-    row = [row_dict.get(h, "") for h in header]
-    ws.append_row(row, value_input_option="USER_ENTERED")
-    read_df.clear()   # invalida o cache dessa leitura
+def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header: bool = True):
+    """Sobrescreve a aba inteira com o DataFrame."""
+    sh = _book()
+    try:
+        ws = sh.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab_name, rows=max(2000, len(df)+10), cols=max(10, len(df.columns)))
+    else:
+        ws.clear()
+    values = [list(map(str, df.columns))] + df.fillna("").astype(str).values.tolist() if keep_header \
+             else df.fillna("").astype(str).values.tolist()
+    ws.update("A1", values, value_input_option="USER_ENTERED")
+    # invalida cache, se você usa @st.cache_data em read_df:
+    try:
+        read_df.clear()
+    except Exception:
+        pass
+
+def append_row(tab_name: str, row: dict):
+    """Acrescenta uma linha (dict) mantendo a ordem do cabeçalho."""
+    sh = _book()
+    try:
+        ws = sh.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        # cria com o cabeçalho vindo da chave do dict
+        headers = list(row.keys())
+        ws = sh.add_worksheet(title=tab_name, rows=2000, cols=max(10, len(headers)))
+        ws.update("1:1", [headers])
+    headers = ws.row_values(1)
+    payload = [row.get(h, "") for h in headers]
+    ws.append_row(payload, value_input_option="USER_ENTERED")
+    try:
+        read_df.clear()
+    except Exception:
+        pass
+
+# Alias para compatibilidade com nomes antigos:
+overwrite_tab = overwrite_tab_from_df
+
+# Opcional, ajuda a evitar import errors “fantasmas”
+__all__ = ["read_df", "append_row", "overwrite_tab_from_df", "overwrite_tab"]
+
+@st.cache_data(ttl=300, show_spinner=False)
