@@ -133,24 +133,36 @@ def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header: bool = T
     read_df.clear()
 
 
-def append_row(tab_name: str, row: dict) -> None:
-    """Acrescenta uma linha (dict) respeitando a ordem do cabeçalho existente."""
+def append_row(tab_name: str, row: dict):
+    """Acrescenta uma linha garantindo que todas as chaves do dict existam no cabeçalho."""
     sh = _book()
     try:
         ws = sh.worksheet(tab_name)
     except gspread.WorksheetNotFound:
+        # cria com cabeçalho vindo do dict
         headers = list(row.keys())
         ws = sh.add_worksheet(title=tab_name, rows=2000, cols=max(10, len(headers)))
         ws.update("1:1", [headers])
+    else:
+        # garante que o cabeçalho tenha TODAS as chaves do dict
+        headers = ws.row_values(1)
+        missing = [k for k in row.keys() if k not in headers]
+        if missing:
+            new_headers = headers + missing
+            ws.resize(rows=ws.row_count, cols=max(ws.col_count, len(new_headers)))
+            ws.update("1:1", [new_headers])
+            headers = new_headers
 
-    # garante que ws existe
-    ws = sh.worksheet(tab_name)
-    headers = ws.row_values(1)
+    # monta a linha respeitando a ordem do cabeçalho
     payload = [row.get(h, "") for h in headers]
     ws.append_row(payload, value_input_option="USER_ENTERED")
 
-    # invalida cache de leitura
-    read_df.clear()
+    # invalida cache de leitura, se existir
+    try:
+        read_df.clear()   # st.cache_data clear
+    except Exception:
+        pass
+
 
 
 def clear_caches() -> None:
