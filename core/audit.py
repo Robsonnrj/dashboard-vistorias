@@ -1,68 +1,61 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-from core.data_loader import read_df, append_row, overwrite_tab_from_df  # import absoluto
+from datetime import datetime
+from .data_loader import read_df, overwrite_tab_from_df, append_row
+from .config import TAB_SOLICITACOES, TAB_AUDIT
 
-def _norm(s: str) -> str:
-    import unicodedata
-    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
-    return s.strip().lower()
-
-def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    if df is None or df.empty:
-        return None
-    for cand in candidates:
-        for c in df.columns:
-            if _norm(c) == _norm(cand):
-                return c
-    for cand in candidates:
-        tgt = _norm(cand)
-        for c in df.columns:
-            if tgt in _norm(c):
-                return c
-    return None
-
-def registrar_historico(row: dict):
-    append_row("historicos", row)
-
-def trilha(numero: str) -> pd.DataFrame:
+def registrar_historico(numero: str, de: str, para: str, justificativa: str, responsavel: str):
+    """Acrescenta um evento de auditoria em TAB_AUDIT (se a aba existir/for usada)."""
+    row = {
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "numero": str(numero),
+        "status_de": str(de or ""),
+        "status_para": str(para or ""),
+        "justificativa": str(justificativa or ""),
+        "responsavel": str(responsavel or ""),
+    }
     try:
-        hist = read_df("historicos")
-        if hist.empty:
-            return pd.DataFrame()
-        col_num = _pick_col(hist, ["numero", "número", "num", "nº", "id", "protocolo"])
-        if not col_num:
-            return pd.DataFrame()
-        return hist[hist[col_num].astype(str) == str(numero)].sort_index(ascending=False)
+        append_row(TAB_AUDIT, row)
     except Exception:
-        return pd.DataFrame()
+        # Se a aba não existir, simplesmente ignora (sistema continua funcionando)
+        pass
 
 def atualizar_status(numero: str, novo_status: str, justificativa: str, responsavel: str):
-    import streamlit as st
-    from datetime import datetime
+    """Atualiza o status do registro na aba base e registra a trilha."""
+    df = read_df(TAB_SOLICITACOES)
+    if df.empty or "numero" not in df.columns:
+        raise ValueError("Planilha base sem dados ou sem a coluna 'numero'.")
 
-    tab_base = st.session_state["tabs_map"]["solicitacoes"]
-    df = read_df(tab_base)
-    if df.empty:
-        raise RuntimeError("A aba base de solicitações está vazia.")
+    # localiza linha pelo número
+    m = pd.to_numeric(df["numero"], errors="coerce") == pd.to_numeric(numero, errors="coerce")
+    if not m.any():
+        raise ValueError(f"Número {numero} não encontrado na aba '{TAB_SOLICITACOES}'.")
 
-    col_num = _pick_col(df, ["numero", "número", "num", "nº", "id", "protocolo"])
-    col_stt = _pick_col(df, ["status_atual", "status", "situação", "situacao"])
-    if not col_num:
-        raise RuntimeError("Não foi possível localizar a coluna 'número'.")
-    if not col_stt:
-        raise RuntimeError("Não foi possível localizar a coluna de 'status'.")
+    # status atual (se existir)
+    col_status = next((c for c in df.columns if c.lower().strip() in ("status_atual","status")), None)
+    if not col_status:
+        # se não existir, cria a coluna
+        col_status = "status_atual"
+        if col_status not in df.columns:
+            df[col_status] = ""
 
-    mask = df[col_num].astype(str) == str(numero)
-    if not mask.any():
-        raise RuntimeError(f"Solicitação '{numero}' não encontrada.")
-    df.loc[mask, col_stt] = str(novo_status)
+    antigo = df.loc[m, col_status].iloc[0] if m.any() else ""
+    # atualiza
+    df.loc[m, col_status] = novo_status
 
-    overwrite_tab_from_df(tab_base, df, keep_header=True)
+    # escreve de volta
+    overwrite_tab_from_df(TAB_SOLICITACOES, df, keep_header=True)
 
-    registrar_historico({
-        "numero": str(numero),
-        "novo_status": str(novo_status),
-        "justificativa": justificativa or "",
-        "responsavel": responsavel or "",
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
+    # audita (se possível)
+    registrar_historico(numero=str(numero), de=str(antigo or ""), para=str(novo_status or ""),
+                        justificativa=justificativa, responsavel=responsavel)
+
+def trilha(numero: str) -> pd.DataFrame:
+    """Retorna a trilha (se a aba existir)."""
+    try:
+        hist = read_df(TAB_AUDIT)
+    except Exception:
+        return pd.DataFrame()
+    if hist.empty or "numero" not in hist.columns:
+        return pd.DataFrame()
+    return hist[ (hist["numero"].astype(str) == str(numero)) ].sort_values("ts", ascending=False)
