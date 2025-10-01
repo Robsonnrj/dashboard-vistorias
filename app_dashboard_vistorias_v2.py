@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
+# ... imports no topo
 import streamlit as st
 from streamlit_option_menu import option_menu
-
 from core.config import has_gsheets, TAB_SOLICITACOES, TAB_VALIDACAO
 from core.data_loader import clear_caches
 
@@ -15,7 +14,7 @@ with st.sidebar:
     if st.button("🔄 Atualizar dados (limpar cache)"):
         clear_caches()
         st.toast("Cache limpo. Recarregando…")
-        st.experimental_rerun()
+        st.rerun()  # <- troquei experimental_rerun() por rerun()
 
 MENU = option_menu(
     None,
