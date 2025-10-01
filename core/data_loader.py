@@ -1,3 +1,4 @@
+# core/data_loader.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -5,6 +6,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import streamlit as st
+from typing import Optional
+import time
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -13,6 +16,7 @@ SCOPES = [
 
 
 def _make_unique_headers(headers: list[str]) -> list[str]:
+    """Cria headers únicos para evitar colunas duplicadas."""
     seen, out = {}, []
     for h in headers:
         h = (h or "").strip() or "col"
@@ -20,12 +24,13 @@ def _make_unique_headers(headers: list[str]) -> list[str]:
             seen[h] += 1
             h = f"{h}_{seen[h]}"
         else:
-            seen[h] = 1
+            seen[h] = 0
         out.append(h)
     return out
 
 
 def has_gsheets() -> bool:
+    """Verifica se as credenciais do Google Sheets estão disponíveis."""
     return (
         "gcp_service_account" in st.secrets
         and "gsheets" in st.secrets
@@ -33,99 +38,181 @@ def has_gsheets() -> bool:
     )
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, ttl=3600)  # Cache de 1 hora
 def _client():
+    """Cria cliente autenticado do Google Sheets (cached)."""
+    if not has_gsheets():
+        raise ValueError("Credenciais do Google Sheets não configuradas em st.secrets")
+    
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, ttl=3600)
 def _book():
-    return _client().open_by_url(st.secrets["gsheets"]["spreadsheet_url"])
+    """Retorna a planilha (workbook) do Google Sheets (cached)."""
+    url = st.secrets["gsheets"]["spreadsheet_url"]
+    return _client().open_by_url(url)
 
 
 def _ensure_ws(title: str, header: list[str]):
+    """Garante que a worksheet existe e tem o header correto."""
     sh = _book()
     try:
         ws = sh.worksheet(title)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=title, rows=2000, cols=max(10, len(header)))
-        ws.update("1:1", [header])
+        ws.update("1:1", [header], value_input_option="USER_ENTERED")
         return ws
-    if ws.row_values(1) != header:
-        ws.update("1:1", [header])
+    
+    # Verifica se o header está correto
+    existing_header = ws.row_values(1)
+    if existing_header != header:
+        ws.update("1:1", [header], value_input_option="USER_ENTERED")
+    
     return ws
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def read_df(tab_name: str) -> pd.DataFrame:
-    """Lê uma aba do Sheets como DataFrame (tolerante)."""
-    ws = _book().worksheet(tab_name)
-    values = ws.get_all_values()
-    if not values:
+@st.cache_data(ttl=300, show_spinner=False)  # Cache de 5 minutos
+def read_df(tab_name: str, use_cache: bool = True) -> pd.DataFrame:
+    """
+    Lê uma aba do Sheets como DataFrame.
+    
+    Args:
+        tab_name: Nome da aba
+        use_cache: Se False, força recarga (útil após escritas)
+    
+    Returns:
+        DataFrame com os dados da aba
+    """
+    try:
+        ws = _book().worksheet(tab_name)
+        values = ws.get_all_values()
+        
+        if not values:
+            return pd.DataFrame()
+        
+        # Cria headers únicos
+        headers = _make_unique_headers(values[0])
+        
+        # Cria DataFrame
+        df = pd.DataFrame(values[1:], columns=headers)
+        
+        # Substitui strings vazias por NA
+        df = df.replace("", pd.NA)
+        
+        return df
+        
+    except gspread.WorksheetNotFound:
+        st.warning(f"⚠️ Aba '{tab_name}' não encontrada no Google Sheets")
         return pd.DataFrame()
-    headers = _make_unique_headers(values[0])
-    df = pd.DataFrame(values[1:], columns=headers).replace("", pd.NA)
-    return df
+    except Exception as e:
+        st.error(f"❌ Erro ao ler aba '{tab_name}': {e}")
+        return pd.DataFrame()
 
 
-def overwrite_tab_from_df(tab_name: str, df: pd.DataFrame, keep_header: bool = True):
-    """Sobrescreve a aba inteira com o DataFrame."""
+def overwrite_tab_from_df(
+    tab_name: str, 
+    df: pd.DataFrame, 
+    keep_header: bool = True,
+    batch_size: int = 1000
+):
+    """
+    Sobrescreve a aba inteira com o DataFrame.
+    
+    Args:
+        tab_name: Nome da aba
+        df: DataFrame a ser escrito
+        keep_header: Se True, inclui o cabeçalho
+        batch_size: Tamanho do lote para upload (evita timeout)
+    """
     sh = _book()
+    
     try:
         ws = sh.worksheet(tab_name)
+        ws.clear()
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(
             title=tab_name,
-            rows=max(2000, len(df) + 10),
+            rows=max(2000, len(df) + 100),
             cols=max(10, len(df.columns)),
         )
-    else:
-        ws.clear()
 
+    # Prepara os dados
     if keep_header:
         values = [list(map(str, df.columns))] + df.fillna("").astype(str).values.tolist()
     else:
         values = df.fillna("").astype(str).values.tolist()
 
-    ws.update("A1", values, value_input_option="USER_ENTERED")
-
-    # invalida cache de leitura
+    # Upload em lotes para evitar timeout
     try:
-        read_df.clear()
-    except Exception:
-        pass
+        if len(values) <= batch_size:
+            ws.update("A1", values, value_input_option="USER_ENTERED")
+        else:
+            for i in range(0, len(values), batch_size):
+                batch = values[i:i + batch_size]
+                start_row = i + 1
+                ws.update(f"A{start_row}", batch, value_input_option="USER_ENTERED")
+                time.sleep(0.5)  # Evita rate limiting
+        
+        # Limpa o cache
+        clear_caches()
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao escrever na aba '{tab_name}': {e}")
+        raise
 
 
 def append_row(tab_name: str, row: dict):
-    """Acrescenta uma linha (dict) respeitando o cabeçalho existente."""
+    """
+    Adiciona uma linha respeitando o cabeçalho existente.
+    
+    Args:
+        tab_name: Nome da aba
+        row: Dicionário com os dados (chaves = nomes das colunas)
+    """
     sh = _book()
+    
     try:
         ws = sh.worksheet(tab_name)
     except gspread.WorksheetNotFound:
+        # Cria a aba com o header do dict
         headers = list(row.keys())
         ws = sh.add_worksheet(title=tab_name, rows=2000, cols=max(10, len(headers)))
-        ws.update("1:1", [headers])
+        ws.update("1:1", [headers], value_input_option="USER_ENTERED")
 
+    # Pega o header atual
     headers = ws.row_values(1)
-    payload = [row.get(h, "") for h in headers]
-    ws.append_row(payload, value_input_option="USER_ENTERED")
-
+    
+    # Monta a linha respeitando a ordem do header
+    payload = [str(row.get(h, "")) for h in headers]
+    
+    # Adiciona a linha
     try:
-        read_df.clear()
-    except Exception:
-        pass
+        ws.append_row(payload, value_input_option="USER_ENTERED")
+        clear_caches()
+    except Exception as e:
+        st.error(f"❌ Erro ao adicionar linha na aba '{tab_name}': {e}")
+        raise
 
 
 def clear_caches():
-    """Limpa somente os caches deste módulo."""
+    """Limpa todos os caches de leitura."""
     try:
         read_df.clear()
     except Exception:
         pass
 
 
-# retrocompatibilidade
+# Retrocompatibilidade
 overwrite_tab = overwrite_tab_from_df
-__all__ = ["read_df", "append_row", "overwrite_tab_from_df", "overwrite_tab", "clear_caches", "has_gsheets"]
+
+__all__ = [
+    "read_df",
+    "append_row",
+    "overwrite_tab_from_df",
+    "overwrite_tab",
+    "clear_caches",
+    "has_gsheets",
+]
