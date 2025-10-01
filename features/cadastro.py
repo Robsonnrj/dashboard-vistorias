@@ -9,7 +9,13 @@ import pandas as pd
 from core.data_loader import append_row, read_df
 from core.config import TAB_SOLICITACOES, TAB_VALIDACAO
 
-
+def _on_om_change(disp2sig: dict[str, str], sig2dir: dict[str, str]):
+    """Callback: ao trocar a OM, atualiza Diretoria e limpa campo de OM manual."""
+    choice = st.session_state.get("om_choice")
+    sig = disp2sig.get(choice or "", "")
+    # se for "Outra / não listada…" mantém diretoria vazia
+    st.session_state["dir_resp"] = sig2dir.get(sig, "") if sig else ""
+    st.session_state["om_sigla_out"] = ""
 # =========================================================
 # Helpers
 # =========================================================
@@ -106,28 +112,26 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
     c1, c2 = st.columns(2)
 
     with c1:
+            # selectbox AGORA chama o callback sempre que mudar
         choice = st.selectbox(
             "OM solicitante (sigla)",
             options=om_options,
             index=None,
             placeholder="Selecione a OM…",
             key="om_choice",
+            on_change=_on_om_change,       # <-
+            kwargs={"disp2sig": disp2sig, "sig2dir": sig2dir},  # passa os mapas
         )
-
+    
+        # descobre a sigla selecionada (ou a digitada)
         om_sigla = ""
         if choice:
             om_sigla = disp2sig.get(choice, "")
             if choice == "Outra / não listada…":
                 om_sigla = st.text_input("Informe a OM (sigla)", key="om_sigla_out").strip()
-
-        auto_dir = sig2dir.get(om_sigla, "") if om_sigla else ""
-        diretoria = st.text_input("Diretoria responsável", value=auto_dir, key="dir_resp")
-
-        tipo_vistoria = st.selectbox(
-            "Tipo de vistoria",
-            ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
-            index=0, key="tipo_vist",
-        )
+    
+        # Diretoria AGORA vem de session_state["dir_resp"], que o callback mantém atualizado
+        diretoria = st.text_input("Diretoria responsável", key="dir_resp")
 
     with c2:
         local = st.text_input("Local / instalação", key="local_inst")
