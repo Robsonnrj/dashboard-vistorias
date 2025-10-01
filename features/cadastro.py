@@ -35,76 +35,104 @@ def _build_om_catalog() -> tuple[list[str], dict[str, str], dict[str, str]]:
     sig2dir: dict[str, str] = {}
     
     try:
-        # Tenta ler com diferentes configurações
-        df = read_df(TAB_VALIDACAO)
+        # Lê os dados sem processar header ainda
+        df_raw = read_df(TAB_VALIDACAO)
         
-        # Debug: mostra as primeiras linhas
-        st.sidebar.write("🔍 DEBUG: Primeiras linhas do DataFrame")
-        st.sidebar.dataframe(df.head(10))
-        st.sidebar.write(f"Colunas: {list(df.columns)}")
-        st.sidebar.write(f"Shape: {df.shape}")
-        
-        # Verifica se precisa pular linhas de cabeçalho
-        # Procura pela linha que contém "OM" e "Organização Militar"
+        # Procura pela linha que contém os cabeçalhos reais
         header_row = None
-        for idx, row in df.iterrows():
-            row_values = [str(v).strip().upper() for v in row.values if not pd.isna(v)]
-            if "OM" in row_values and any("ORGANIZA" in v for v in row_values):
+        for idx in range(min(5, len(df_raw))):  # Procura nas primeiras 5 linhas
+            row_values = df_raw.iloc[idx].astype(str).str.upper().tolist()
+            if "OM" in row_values and any("ORGANIZA" in str(v) for v in row_values):
                 header_row = idx
-                st.sidebar.write(f"✅ Header encontrado na linha {idx}")
                 break
         
-        if header_row is not None and header_row > 0:
-            # Recarrega com o header correto
-            df = read_df(TAB_VALIDACAO)
-            # Remove linhas antes do header
-            df = df.iloc[header_row + 1:].reset_index(drop=True)
-            # Define os nomes das colunas a partir da linha do header
-            header_data = read_df(TAB_VALIDACAO).iloc[header_row]
-            df.columns = [_clean(str(c)) for c in header_data.values]
-            
-            st.sidebar.write("✅ DataFrame após ajuste de header:")
-            st.sidebar.dataframe(df.head(10))
-            st.sidebar.write(f"Novas colunas: {list(df.columns)}")
+        if header_row is None:
+            st.sidebar.warning("⚠️ Não foi possível localizar o cabeçalho na aba de validação")
+            return options, disp2sig, sig2dir
         
-        # Identifica as colunas importantes
+        # Pega os dados a partir da linha seguinte ao header
+        df = df_raw.iloc[header_row + 1:].reset_index(drop=True)
+        
+        # Define nomes únicos para as colunas baseado no header encontrado
+        header_values = df_raw.iloc[header_row].tolist()
+        
+        # Cria nomes únicos para colunas duplicadas
+        col_names = []
+        col_counts = {}
+        for val in header_values:
+            val_str = _clean(str(val))
+            if not val_str or val_str == "<NA>":
+                val_str = f"col_{len(col_names)}"
+            
+            if val_str in col_counts:
+                col_counts[val_str] += 1
+                val_str = f"{val_str}_{col_counts[val_str]}"
+            else:
+                col_counts[val_str] = 0
+            
+            col_names.append(val_str)
+        
+        df.columns = col_names
+        
+        # Debug: mostra informações
+        st.sidebar.write("🔍 DEBUG: Estrutura após ajuste")
+        st.sidebar.write(f"Total de linhas: {len(df)}")
+        st.sidebar.write(f"Colunas: {col_names[:6]}")  # Mostra apenas as primeiras 6
+        
+        # Mostra preview dos dados (convertendo para dict para evitar erro de colunas duplicadas)
+        preview_data = {
+            "col": col_names[:12],
+            "val_linha_0": df.iloc[0].tolist()[:12] if len(df) > 0 else [],
+            "val_linha_1": df.iloc[1].tolist()[:12] if len(df) > 1 else [],
+            "val_linha_2": df.iloc[2].tolist()[:12] if len(df) > 2 else [],
+        }
+        st.sidebar.write("Preview dos dados:")
+        st.sidebar.json(preview_data)
+        
+        # Identifica as colunas importantes (pega a primeira ocorrência)
         col_sig = None
         col_nome = None
         col_dir = None
         
-        for col in df.columns:
-            col_upper = str(col).upper().strip()
-            if col_upper in ["OM", "SIGLA", "OM APOIADA"]:
+        for i, col in enumerate(col_names):
+            col_upper = col.upper()
+            if col_sig is None and ("OM" == col_upper or "SIGLA" in col_upper):
                 col_sig = col
-            elif "ORGANIZA" in col_upper and "MILITAR" in col_upper:
+            if col_nome is None and "ORGANIZA" in col_upper:
                 col_nome = col
-            elif "DIRETORIA" in col_upper:
+            if col_dir is None and "DIRETORIA" in col_upper:
                 col_dir = col
         
-        st.sidebar.write(f"Colunas identificadas:")
+        st.sidebar.write("✅ Colunas identificadas:")
         st.sidebar.write(f"  - Sigla: {col_sig}")
         st.sidebar.write(f"  - Nome: {col_nome}")
         st.sidebar.write(f"  - Diretoria: {col_dir}")
         
-        if col_sig and df.shape[0] > 0:
+        if col_sig and len(df) > 0:
             # Cria dataframe limpo
             tmp = pd.DataFrame({
-                "sig": df[col_sig].apply(_clean) if col_sig else "",
+                "sig": df[col_sig].apply(_clean),
                 "nome": df[col_nome].apply(_clean) if col_nome else "",
                 "dir": df[col_dir].apply(_clean) if col_dir else "",
             })
             
-            # Remove linhas vazias e de cabeçalho duplicado
+            # Remove linhas vazias e inválidas
             tmp = tmp[tmp["sig"] != ""]
             tmp = tmp[tmp["sig"].str.upper() != "OM"]
             tmp = tmp[tmp["sig"].str.upper() != "NR"]
+            tmp = tmp[tmp["sig"].str.len() > 0]
             tmp = tmp[~tmp["sig"].str.contains("unnamed", case=False, na=False)]
             
-            # Remove duplicatas
+            # Remove duplicatas (mantém a primeira ocorrência)
             tmp = tmp.drop_duplicates(subset=["sig"], keep="first")
             
-            st.sidebar.write(f"✅ Total de OMs válidas encontradas: {len(tmp)}")
-            st.sidebar.dataframe(tmp.head(15))
+            st.sidebar.write(f"✅ Total de OMs válidas: {len(tmp)}")
+            
+            # Mostra as primeiras 10 OMs encontradas
+            if len(tmp) > 0:
+                st.sidebar.write("Primeiras OMs encontradas:")
+                for idx, row in tmp.head(10).iterrows():
+                    st.sidebar.text(f"  {row['sig']} → {row['nome'][:30]}... | {row['dir']}")
             
             # Cria as opções para o selectbox
             for _, r in tmp.iterrows():
@@ -116,18 +144,18 @@ def _build_om_catalog() -> tuple[list[str], dict[str, str], dict[str, str]]:
             
             options = sorted(options)
         else:
-            st.sidebar.warning("⚠️ Nenhuma coluna de OM/Sigla identificada!")
+            st.sidebar.warning("⚠️ Nenhuma coluna de OM identificada ou DataFrame vazio!")
             
     except Exception as e:
         st.sidebar.error(f"❌ Erro ao carregar dados: {e}")
         import traceback
-        st.sidebar.code(traceback.format_exc())
+        st.sidebar.code(traceback.format_exc(), language="python")
     
     # Adiciona opção para OM não listada
     options.append("Outra / não listada…")
     disp2sig["Outra / não listada…"] = ""
     
-    st.sidebar.write(f"📊 Total de opções no dropdown: {len(options)}")
+    st.sidebar.write(f"📊 Total final no dropdown: {len(options)}")
     
     return options, disp2sig, sig2dir
 
