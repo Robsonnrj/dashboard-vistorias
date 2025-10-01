@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
-from datetime import date
+from datetime import datetime
 import pandas as pd
 
 from core.data_loader import append_row, read_df
@@ -48,74 +48,47 @@ def _load_oms_map() -> tuple[list[str], dict[str, str], dict[str, str]]:
 
 
 
-def _input_row(oms_df: pd.DataFrame | None = None):
-    """Coleta os campos do formulário e devolve (row, ok). 
-       Se `oms_df` for passado, usa-o para autocomplete de OM e preenchimento de Diretoria."""
+def _input_row(oms_df: pd.DataFrame):
     st.subheader("📥 Nova solicitação de vistoria")
-
-    # --- Autocomplete de OM + diretoria (se você já montou o dicionário em outro lugar, pode remover esta parte) ---
-    display_to_sigla: dict[str, str] = {}
-    sigla_to_dir: dict[str, str] = {}
-    if isinstance(oms_df, pd.DataFrame) and not oms_df.empty:
-        for _, r in oms_df.iterrows():
-            sig = str(r.get("om_sigla", "") or "").strip()
-            nom = str(r.get("om_nome", "") or "").strip()
-            dir_ = str(r.get("diretoria", "") or "").strip()
-            if not sig:
-                continue
-            display = f"{sig} — {nom}" if nom else sig
-            display_to_sigla[display] = sig
-            sigla_to_dir[sig] = dir_
 
     col1, col2 = st.columns(2)
     with col1:
-        # OM: se temos base, usa autocomplete; senão, text_input
-        if display_to_sigla:
-            om_display = st.selectbox("OM solicitante (sigla)", [""] + sorted(display_to_sigla.keys()))
-            om_solicitante = display_to_sigla.get(om_display, "")
-        else:
-            om_solicitante = st.text_input("OM solicitante (sigla)").strip()
+        om_solicitante = st.selectbox("OM solicitante (sigla)", 
+                                      options=oms_df["OM"].unique().tolist() if not oms_df.empty else [])
+        diretoria = ""
+        if om_solicitante and not oms_df.empty:
+            diretoria = oms_df.loc[oms_df["OM"] == om_solicitante, "Diretoria Responsável"].values[0]
 
-        # Diretoria: se mapeada pela OM, preenche e desabilita
-        diretoria_auto = sigla_to_dir.get(om_solicitante, "")
-        if diretoria_auto:
-            diretoria = st.text_input("Diretoria responsável", value=diretoria_auto, disabled=True)
-        else:
-            diretoria = st.text_input("Diretoria responsável").strip()
-
-        tipo_vistoria = st.selectbox(
-            "Tipo de vistoria",
-            ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
-            index=0,
-        )
+        tipo_vistoria = st.selectbox("Tipo de vistoria", 
+                                     ["Periódica", "Emergencial", "Preventiva", "Extraordinária"], index=0)
 
     with col2:
-        local = st.text_input("Local / instalação").strip()
+        local = st.text_input("Local / instalação")
         urgencia = st.selectbox("Urgência", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
         data_limite = st.date_input("Data limite (se houver)", value=None)
 
     motivo = st.text_area("Motivo / justificativa (NAOM)", height=120)
 
-    # --- Validações (sem unsafe_allow_html) ---
+    # Validações simples
     erros = []
     if not om_solicitante:
         erros.append("Informe a **OM solicitante**.")
-    if not local:
+    if not local.strip():
         erros.append("Informe o **local/instalação**.")
-    if not (motivo or "").strip():
+    if not motivo.strip():
         erros.append("Descreva o **motivo/justificativa**.")
 
     if erros:
-        # avisar sem HTML; se quiser bullets bonitas, use st.markdown com unsafe_allow_html=True
-        st.warning("• " + "\n• ".join(erros))
+        st.warning("• " + "<br>• ".join(erros), unsafe_allow_html=True)
 
+    # 🔹 Dicionário já no formato da aba "ACOMPANHAMENTO VISTORIAS"
     row = {
-        "OBJETO DE VISTORIA": (motivo or "").strip(),  # ajuste se quiser outro campo como “objeto”
+        "OBJETO DE VISTORIA": (motivo or "").strip(),
         "OM APOIADA": om_solicitante,
         "Diretoria Responsável": diretoria,
         "Classificação de Urgência": urgencia,
-        "Situação": "SOLICITADA",  # estado inicial
-        "DATA DA SOLICITAÇÃO": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "Situação": "SOLICITADA",
+        "DATA DA SOLICITAÇÃO": datetime.now().strftime("%Y-%m-%d %H:%M"),   # ✅ corrigido
         "DATA DA SOLICITAÇÃO_2": data_limite.strftime("%Y-%m-%d") if data_limite else "",
         "REFERÊNCIA OPUS": "",
         "OBJETIVO (ADICIONAR POSSÍVEL CONTATO)": (motivo or "").strip(),
@@ -130,10 +103,9 @@ def _input_row(oms_df: pd.DataFrame | None = None):
         "QUANTIDADE DE DIAS PARA EXECUÇÃO": "",
         "OBSERVAÇÕES": "",
     }
-    ok = (len(erros) == 0)
-    return row, ok
 
-
+    return row, (len(erros) == 0)
+    
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
 
