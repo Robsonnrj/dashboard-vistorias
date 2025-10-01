@@ -17,6 +17,13 @@ with st.sidebar:
         st.toast("Cache limpo. Recarregando…")
         st.experimental_rerun()
 
+MENU = option_menu(
+    None,
+    ["📊 Dashboard", "📝 Cadastro", "🧾 Status/Auditoria"],
+    icons=["bar-chart", "file-plus", "list-check"],
+    default_index=0,
+)
+
 if MENU == "📊 Dashboard":
     from features import dashboard
     dashboard.page()
