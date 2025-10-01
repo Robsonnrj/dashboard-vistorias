@@ -7,7 +7,7 @@ from datetime import datetime, date
 import pandas as pd
 
 from core.data_loader import append_row, read_df
-from core.config import TAB_VALIDACAO  # usamos apenas a aba de validação
+from core.config import TAB_VALIDACAO
 
 
 # =========================================================
@@ -15,81 +15,125 @@ from core.config import TAB_VALIDACAO  # usamos apenas a aba de validação
 # =========================================================
 def _clean(x) -> str:
     """Normaliza valores vindos do Sheets."""
-    s = "" if pd.isna(x) else str(x).strip()
-    if s.upper() in {"#N/A", "N/A", "NA", "NAN", "NONE", "-"}:
+    if pd.isna(x):
+        return ""
+    s = str(x).strip()
+    if s.upper() in {"#N/A", "N/A", "NA", "NAN", "NONE", "-", ""}:
         return ""
     return s
 
 
 def _build_om_catalog() -> tuple[list[str], dict[str, str], dict[str, str]]:
     """
-    Lê a aba de validação (TAB_VALIDACAO) e monta:
+    Lê a aba de validação e monta:
       - options: rótulos para o select (ex.: "1º BPE — 1º Batalhão ...")
       - disp2sig: rótulo -> sigla
       - sig2dir : sigla  -> diretoria
     """
-    try:
-        # Lê a aba de validação com header na linha 1 (índice 1)
-        df = read_df(TAB_VALIDACAO, header=1)
-        
-        # Se read_df não suportar o parâmetro header, use esta alternativa:
-        # df = pd.read_excel("caminho_do_arquivo.xlsx", sheet_name=TAB_VALIDACAO, header=1)
-        
-    except Exception as e:
-        st.warning(f"Erro ao carregar dados de validação: {e}")
-        df = pd.DataFrame()
-
     options: list[str] = []
     disp2sig: dict[str, str] = {}
     sig2dir: dict[str, str] = {}
-
-    if not df.empty:
-        # As colunas estão como "Unnamed: X", então precisamos usar os índices
-        # Coluna 1: OM (sigla)
-        # Coluna 2: Organização Militar (nome completo)
-        # Coluna 3: Diretoria Responsável
+    
+    try:
+        # Tenta ler com diferentes configurações
+        df = read_df(TAB_VALIDACAO)
         
-        if len(df.columns) >= 4:
-            # Renomeia as colunas para facilitar
-            col_sig = df.columns[1]   # "Unnamed: 1" -> OM (sigla)
-            col_nome = df.columns[2]  # "Unnamed: 2" -> Organização Militar
-            col_dir = df.columns[3]   # "Unnamed: 3" -> Diretoria Responsável
+        # Debug: mostra as primeiras linhas
+        st.sidebar.write("🔍 DEBUG: Primeiras linhas do DataFrame")
+        st.sidebar.dataframe(df.head(10))
+        st.sidebar.write(f"Colunas: {list(df.columns)}")
+        st.sidebar.write(f"Shape: {df.shape}")
+        
+        # Verifica se precisa pular linhas de cabeçalho
+        # Procura pela linha que contém "OM" e "Organização Militar"
+        header_row = None
+        for idx, row in df.iterrows():
+            row_values = [str(v).strip().upper() for v in row.values if not pd.isna(v)]
+            if "OM" in row_values and any("ORGANIZA" in v for v in row_values):
+                header_row = idx
+                st.sidebar.write(f"✅ Header encontrado na linha {idx}")
+                break
+        
+        if header_row is not None and header_row > 0:
+            # Recarrega com o header correto
+            df = read_df(TAB_VALIDACAO)
+            # Remove linhas antes do header
+            df = df.iloc[header_row + 1:].reset_index(drop=True)
+            # Define os nomes das colunas a partir da linha do header
+            header_data = read_df(TAB_VALIDACAO).iloc[header_row]
+            df.columns = [_clean(str(c)) for c in header_data.values]
             
+            st.sidebar.write("✅ DataFrame após ajuste de header:")
+            st.sidebar.dataframe(df.head(10))
+            st.sidebar.write(f"Novas colunas: {list(df.columns)}")
+        
+        # Identifica as colunas importantes
+        col_sig = None
+        col_nome = None
+        col_dir = None
+        
+        for col in df.columns:
+            col_upper = str(col).upper().strip()
+            if col_upper in ["OM", "SIGLA", "OM APOIADA"]:
+                col_sig = col
+            elif "ORGANIZA" in col_upper and "MILITAR" in col_upper:
+                col_nome = col
+            elif "DIRETORIA" in col_upper:
+                col_dir = col
+        
+        st.sidebar.write(f"Colunas identificadas:")
+        st.sidebar.write(f"  - Sigla: {col_sig}")
+        st.sidebar.write(f"  - Nome: {col_nome}")
+        st.sidebar.write(f"  - Diretoria: {col_dir}")
+        
+        if col_sig and df.shape[0] > 0:
             # Cria dataframe limpo
             tmp = pd.DataFrame({
-                "sig": df[col_sig].map(_clean),
-                "nome": df[col_nome].map(_clean),
-                "dir": df[col_dir].map(_clean),
+                "sig": df[col_sig].apply(_clean) if col_sig else "",
+                "nome": df[col_nome].apply(_clean) if col_nome else "",
+                "dir": df[col_dir].apply(_clean) if col_dir else "",
             })
             
-            # Remove linha de cabeçalho duplicada (NR, OM, Organização Militar...)
-            tmp = tmp[tmp["sig"] != "OM"]
-            tmp = tmp[tmp["sig"] != "NR"]
+            # Remove linhas vazias e de cabeçalho duplicado
             tmp = tmp[tmp["sig"] != ""]
+            tmp = tmp[tmp["sig"].str.upper() != "OM"]
+            tmp = tmp[tmp["sig"].str.upper() != "NR"]
+            tmp = tmp[~tmp["sig"].str.contains("unnamed", case=False, na=False)]
             
             # Remove duplicatas
-            tmp = tmp.drop_duplicates("sig")
+            tmp = tmp.drop_duplicates(subset=["sig"], keep="first")
+            
+            st.sidebar.write(f"✅ Total de OMs válidas encontradas: {len(tmp)}")
+            st.sidebar.dataframe(tmp.head(15))
             
             # Cria as opções para o selectbox
             for _, r in tmp.iterrows():
-                if r['sig']:  # Só adiciona se tiver sigla
+                if r['sig']:
                     label = f"{r['sig']} — {r['nome']}" if r['nome'] else r['sig']
                     options.append(label)
                     disp2sig[label] = r["sig"]
                     sig2dir[r["sig"]] = r["dir"] if r["dir"] else ""
-
-    # Ordena alfabeticamente
-    options = sorted(options)
+            
+            options = sorted(options)
+        else:
+            st.sidebar.warning("⚠️ Nenhuma coluna de OM/Sigla identificada!")
+            
+    except Exception as e:
+        st.sidebar.error(f"❌ Erro ao carregar dados: {e}")
+        import traceback
+        st.sidebar.code(traceback.format_exc())
     
     # Adiciona opção para OM não listada
     options.append("Outra / não listada…")
     disp2sig["Outra / não listada…"] = ""
     
+    st.sidebar.write(f"📊 Total de opções no dropdown: {len(options)}")
+    
     return options, disp2sig, sig2dir
 
 
 # ---------------------------------------------------------
-# Callback: ao trocar a OM, atualiza Diretoria e limpa OM manual
+# Callback: ao trocar a OM, atualiza Diretoria
 # ---------------------------------------------------------
 def _on_om_change(disp2sig: dict[str, str], sig2dir: dict[str, str]):
     choice = st.session_state.get("om_choice")
@@ -99,7 +143,7 @@ def _on_om_change(disp2sig: dict[str, str], sig2dir: dict[str, str]):
 
 
 # ---------------------------------------------------------
-# Chaves do formulário para limpeza automática
+# Chaves do formulário
 # ---------------------------------------------------------
 FORM_KEYS = [
     "om_choice", "om_sigla_out", "dir_resp",
@@ -136,19 +180,16 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
             kwargs={"disp2sig": disp2sig, "sig2dir": sig2dir},
         )
 
-        # Sigla selecionada (ou digitada)
         om_sigla = ""
         if choice:
             om_sigla = disp2sig.get(choice, "")
             if choice == "Outra / não listada…":
                 om_sigla = st.text_input("Informe a OM (sigla)", key="om_sigla_out").strip()
 
-        # Diretoria sincronizada automaticamente pelo callback
-        # Torna o campo editável caso o usuário precise ajustar
         diretoria = st.text_input(
             "Diretoria responsável", 
             key="dir_resp",
-            help="Preenchimento automático. Você pode editar se necessário."
+            help="Preenchimento automático baseado na OM selecionada"
         )
 
         tipo_vistoria = st.selectbox(
@@ -209,9 +250,8 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
         erros.append("Descreva o motivo/justificativa (NAOM).")
 
     if erros:
-        st.warning("• " + "\n• ".join(erros))
+        st.warning("⚠️ Preencha os campos obrigatórios:\n• " + "\n• ".join(erros))
 
-    # ---------- Monta linha conforme a aba ACOMPANHAMENTO VISTORIAS ----------
     row = {
         "OBJETO DE VISTORIA": motivo.strip(),
         "OM APOIADA": om_sigla,
@@ -244,15 +284,8 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
 
-    # Catálogo de OMs (sigla + diretoria automática) da aba Validacao_de_Dados
+    # Catálogo de OMs
     om_options, disp2sig, sig2dir = _build_om_catalog()
-
-    # Debug (opcional - remova em produção)
-    if st.checkbox("🔍 Mostrar dados carregados (debug)", value=False):
-        st.info(f"Total de OMs carregadas: {len(om_options) - 1}")  # -1 por causa de "Outra/não listada"
-        with st.expander("Ver detalhes"):
-            st.write("**Opções disponíveis:**", om_options[:10])
-            st.write("**Mapeamento sigla -> diretoria:**", dict(list(sig2dir.items())[:10]))
 
     # Formulário
     row, ok = _input_row(om_options, disp2sig, sig2dir)
@@ -260,12 +293,12 @@ def page():
     st.divider()
     if st.button("💾 Salvar na aba ACOMPANHAMENTO VISTORIAS", type="primary", disabled=not ok):
         try:
-            # normaliza NaN -> "" e tudo como str
             clean_row = {k: ("" if pd.isna(v) else str(v)) for k, v in row.items()}
             append_row("ACOMPANHAMENTO VISTORIAS", clean_row)
-            st.success("✅ Registro salvo com sucesso na aba **ACOMPANHAMENTO VISTORIAS**.")
-            # limpa o formulário para um novo cadastro
+            st.success("✅ Registro salvo com sucesso!")
             _reset_form()
             st.rerun()
         except Exception as e:
             st.error(f"❌ Falha ao salvar: {e}")
+            import traceback
+            st.error(traceback.format_exc())
