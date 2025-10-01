@@ -3,6 +3,11 @@
 # Abas fixas usadas pelo sistema
 TAB_SOLICITACOES = "ACOMPANHAMENTO VISTORIAS"   # base de registros (cadastro, dashboards, status)
 TAB_VALIDACAO    = "Validacao_de_Dados"         # lista oficial de OMs
-TAB_AUDIT        = "HISTORICOS"                 # opcional: trilha de auditoria
 
-from core.data_loader import has_gsheets
+def has_gsheets() -> bool:
+    import streamlit as st
+    return (
+        "gcp_service_account" in st.secrets
+        and "gsheets" in st.secrets
+        and st.secrets["gsheets"].get("spreadsheet_url")
+    )
