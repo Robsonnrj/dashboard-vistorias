@@ -54,8 +54,7 @@ def _load_oms_df() -> pd.DataFrame:
             if c in out.columns:
                 out[c] = out[c].fillna("").astype(str).str.strip()
 
-        out = out[out["diretoria"] != ""]
-        out = out.drop_duplicates(subset=["om_sigla", "om_nome", "diretoria"])
+        out = out[out["diretoria"] != ""].drop_duplicates()
         if not out.empty:
             return out
 
@@ -71,8 +70,7 @@ def _build_om_options(oms_df: pd.DataFrame):
       disp_to_sigla:  display -> sigla
       sigla_to_dir:   sigla  -> diretoria
     """
-    options_display, disp_to_sigla = [], {}
-    sigla_to_dir = {}
+    options_display, disp_to_sigla, sigla_to_dir = [], {}, {}
 
     if not oms_df.empty:
         for _, r in oms_df.iterrows():
@@ -174,9 +172,9 @@ def _input_row(oms_df: pd.DataFrame):
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
 
-    # Abas definidas na sidebar (mantém compatibilidade)
-    tabs_map = st.session_state.get("tabs_map", {})
-    tab_solic = tabs_map.get("solicitacoes", "ACOMPANHAMENTO VISTORIAS")
+    # 🔹 Agora fixo na aba ACOMPANHAMENTO VISTORIAS
+    
+    tab_solic = "ACOMPANHAMENTO VISTORIAS"
 
     # DataFrame existente (só p/ mostrar últimos)
     try:
