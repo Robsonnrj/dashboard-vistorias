@@ -7,20 +7,18 @@ from datetime import datetime, date
 import pandas as pd
 
 from core.data_loader import append_row, read_df
-from core.config import TAB_SOLICITACOES, TAB_VALIDACAO
+from core.config import TAB_VALIDACAO  # usamos apenas a aba de validação
 
-def _on_om_change(disp2sig: dict[str, str], sig2dir: dict[str, str]):
-    """Callback: ao trocar a OM, atualiza Diretoria e limpa campo de OM manual."""
-    choice = st.session_state.get("om_choice")
-    sig = disp2sig.get(choice or "", "")
-    # se for "Outra / não listada…" mantém diretoria vazia
-    st.session_state["dir_resp"] = sig2dir.get(sig, "") if sig else ""
-    st.session_state["om_sigla_out"] = ""
+
 # =========================================================
 # Helpers
 # =========================================================
 def _clean(x) -> str:
-    return "" if pd.isna(x) else str(x).strip()
+    """Normaliza valores vindos do Sheets."""
+    s = "" if pd.isna(x) else str(x).strip()
+    if s.upper() in {"#N/A", "N/A", "NA", "NAN", "NONE", "-"}:
+        return ""
+    return s
 
 
 def _pick(df: pd.DataFrame, *cands: str) -> str | None:
@@ -44,45 +42,54 @@ def _pick(df: pd.DataFrame, *cands: str) -> str | None:
 
 
 def _build_om_catalog() -> tuple[list[str], dict[str, str], dict[str, str]]:
-    """Cria catálogo de OMs: options (rótulo), rótulo->sigla, sigla->diretoria."""
+    """
+    Lê SOMENTE a aba de validação (TAB_VALIDACAO) e monta:
+      - options: rótulos para o select (ex.: "1º BPE — 1º Batalhão ...")
+      - disp2sig: rótulo -> sigla
+      - sig2dir : sigla  -> diretoria
+    """
+    try:
+        df = read_df(TAB_VALIDACAO)
+    except Exception:
+        df = pd.DataFrame()
+
     options: list[str] = []
     disp2sig: dict[str, str] = {}
     sig2dir: dict[str, str] = {}
 
-    # Prioriza Validação; se não achar, tenta a base principal
-    for tab in (TAB_VALIDACAO, TAB_SOLICITACOES):
-        try:
-            df = read_df(tab)
-        except Exception:
-            continue
-        if df is None or df.empty:
-            continue
+    if not df.empty:
+        c_sig = _pick(df, "OM", "OM APOIADA", "SIGLA", "OM SIGLA", "Sigla")
+        c_nom = _pick(df, "Organização Militar", "Organizacao Militar", "OM NOME", "Nome")
+        c_dir = _pick(df, "Diretoria Responsável", "Diretoria", "DIR")
 
-        c_sig = _pick(df, "OM", "OM APOIADA", "SIGLA", "OM SIGLA")
-        c_nom = _pick(df, "Organização Militar", "OM NOME", "NOME")
-        c_dir = _pick(df, "Diretoria Responsável", "Diretoria", "DIR", "DIRETORIA RESPOSÁVEL")
-        if not c_sig or not c_dir:
-            continue
+        if c_sig and c_dir:
+            tmp = pd.DataFrame({
+                "sig": df[c_sig].map(_clean),
+                "nome": df[c_nom].map(_clean) if c_nom else "",
+                "dir":  df[c_dir].map(_clean),
+            })
+            tmp = tmp[(tmp["sig"] != "")].drop_duplicates("sig")
 
-        tmp = pd.DataFrame({
-            "sig": df[c_sig].map(_clean),
-            "nome": df[c_nom].map(_clean) if c_nom else "",
-            "dir":  df[c_dir].map(_clean),
-        })
-        tmp = tmp[tmp["sig"] != ""].drop_duplicates("sig")
-
-        for _, r in tmp.iterrows():
-            label = f"{r['sig']} — {r['nome']}" if r["nome"] else r["sig"]
-            if label not in options:
+            for _, r in tmp.iterrows():
+                label = f"{r['sig']} — {r['nome']}" if r["nome"] else r["sig"]
                 options.append(label)
                 disp2sig[label] = r["sig"]
                 sig2dir[r["sig"]] = r["dir"]
-        break
 
     options = sorted(options)
     options.append("Outra / não listada…")
     disp2sig["Outra / não listada…"] = ""
     return options, disp2sig, sig2dir
+
+
+# ---------------------------------------------------------
+# Callback: ao trocar a OM, atualiza Diretoria e limpa OM manual
+# ---------------------------------------------------------
+def _on_om_change(disp2sig: dict[str, str], sig2dir: dict[str, str]):
+    choice = st.session_state.get("om_choice")
+    sig = disp2sig.get(choice or "", "")
+    st.session_state["dir_resp"] = sig2dir.get(sig, "") if sig else ""
+    st.session_state["om_sigla_out"] = ""
 
 
 # ---------------------------------------------------------
@@ -111,28 +118,36 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
 
     c1, c2 = st.columns(2)
 
+    # -------- coluna 1 --------
     with c1:
-            # selectbox AGORA chama o callback sempre que mudar
         choice = st.selectbox(
             "OM solicitante (sigla)",
             options=om_options,
             index=None,
             placeholder="Selecione a OM…",
             key="om_choice",
-            on_change=_on_om_change,       # <-
-            kwargs={"disp2sig": disp2sig, "sig2dir": sig2dir},  # passa os mapas
+            on_change=_on_om_change,
+            kwargs={"disp2sig": disp2sig, "sig2dir": sig2dir},
         )
-    
-        # descobre a sigla selecionada (ou a digitada)
+
+        # Sigla selecionada (ou digitada)
         om_sigla = ""
         if choice:
             om_sigla = disp2sig.get(choice, "")
             if choice == "Outra / não listada…":
                 om_sigla = st.text_input("Informe a OM (sigla)", key="om_sigla_out").strip()
-    
-        # Diretoria AGORA vem de session_state["dir_resp"], que o callback mantém atualizado
+
+        # Diretoria sincronizada automaticamente pelo callback
         diretoria = st.text_input("Diretoria responsável", key="dir_resp")
 
+        tipo_vistoria = st.selectbox(
+            "Tipo de vistoria",
+            ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
+            index=0,
+            key="tipo_vist",
+        )
+
+    # -------- coluna 2 --------
     with c2:
         local = st.text_input("Local / instalação", key="local_inst")
         urgencia = st.selectbox(
@@ -155,13 +170,23 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
         obs = st.text_area("OBSERVAÇÕES", height=90, key="obs")
 
     with cc2:
-        data_vistoria: date | None = st.date_input("DATA DA VISTORIA", value=None, format="YYYY/MM/DD", key="data_vist")
-        data_prev_conc: date | None = st.date_input("DATA/PREVISÃO DE CONCLUSÃO", value=None, format="YYYY/MM/DD", key="data_prev_conc")
+        data_vistoria: date | None = st.date_input(
+            "DATA DA VISTORIA", value=None, format="YYYY/MM/DD", key="data_vist"
+        )
+        data_prev_conc: date | None = st.date_input(
+            "DATA/PREVISÃO DE CONCLUSÃO", value=None, format="YYYY/MM/DD", key="data_prev_conc"
+        )
         meio_resposta = st.text_input("MEIO DE RESPOSTA DA SOLICITAÇÃO", key="meio_resp")
-        data_resposta: date | None = st.date_input("DATA DA RESPOSTA A SOLICITAÇÃO", value=None, format="YYYY/MM/DD", key="data_resp")
+        data_resposta: date | None = st.date_input(
+            "DATA DA RESPOSTA A SOLICITAÇÃO", value=None, format="YYYY/MM/DD", key="data_resp"
+        )
         num_opus = st.text_input("Nº OPUS DA VISTORIA (SE FOR O CASO)", key="num_opus")
-        qd_total = st.number_input("QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO", min_value=0, step=1, value=0, key="qd_total")
-        qd_exec  = st.number_input("QUANTIDADE DE DIAS PARA EXECUÇÃO", min_value=0, step=1, value=0, key="qd_exec")
+        qd_total = st.number_input(
+            "QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO", min_value=0, step=1, value=0, key="qd_total"
+        )
+        qd_exec = st.number_input(
+            "QUANTIDADE DE DIAS PARA EXECUÇÃO", min_value=0, step=1, value=0, key="qd_exec"
+        )
 
     # ---------- Validações ----------
     erros = []
@@ -208,14 +233,7 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
 
-    # (mantém compat com sua sidebar)
-    tabs_map = st.session_state.get("tabs_map", {})
-    _ = tabs_map.get("solicitacoes", "ACOMPANHAMENTO VISTORIAS")
-    _ = tabs_map.get("validacao", "Validacao_de_Dados")
-
-    tab_save = "ACOMPANHAMENTO VISTORIAS"
-
-    # Catálogo de OMs (sigla + diretoria automática)
+    # Catálogo de OMs (sigla + diretoria automática) — SOMENTE da aba de validação
     om_options, disp2sig, sig2dir = _build_om_catalog()
 
     # Formulário
@@ -226,7 +244,7 @@ def page():
         try:
             # normaliza NaN -> "" e tudo como str
             clean_row = {k: ("" if pd.isna(v) else str(v)) for k, v in row.items()}
-            append_row(tab_save, clean_row)
+            append_row("ACOMPANHAMENTO VISTORIAS", clean_row)
             st.success("Registro salvo com sucesso na aba **ACOMPANHAMENTO VISTORIAS**.")
             # limpa o formulário para um novo cadastro
             _reset_form()
