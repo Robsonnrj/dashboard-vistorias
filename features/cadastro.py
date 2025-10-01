@@ -47,99 +47,144 @@ def _load_oms_map() -> tuple[list[str], dict[str, str], dict[str, str]]:
     return options, disp2sig, sig2dir
 
 
-def _input_row(oms_df: pd.DataFrame | None):
+
+def _input_row(oms_df: pd.DataFrame | None = None):
+    """Coleta os campos do formulário e devolve (row, ok). 
+       Se `oms_df` for passado, usa-o para autocomplete de OM e preenchimento de Diretoria."""
     st.subheader("📥 Nova solicitação de vistoria")
 
-    options, disp2sig, sig2dir = _load_oms_map()
+    # --- Autocomplete de OM + diretoria (se você já montou o dicionário em outro lugar, pode remover esta parte) ---
+    display_to_sigla: dict[str, str] = {}
+    sigla_to_dir: dict[str, str] = {}
+    if isinstance(oms_df, pd.DataFrame) and not oms_df.empty:
+        for _, r in oms_df.iterrows():
+            sig = str(r.get("om_sigla", "") or "").strip()
+            nom = str(r.get("om_nome", "") or "").strip()
+            dir_ = str(r.get("diretoria", "") or "").strip()
+            if not sig:
+                continue
+            display = f"{sig} — {nom}" if nom else sig
+            display_to_sigla[display] = sig
+            sigla_to_dir[sig] = dir_
 
     col1, col2 = st.columns(2)
     with col1:
-        om_display = st.selectbox("OM APOIADA *", options, index=None, placeholder="Digite para buscar…")
-        om_sigla = disp2sig.get(om_display or "", "")
-        diretoria = st.text_input("Diretoria Responsável *", value=sig2dir.get(om_sigla, ""))
-        objeto = st.text_input("OBJETO DE VISTORIA *", value="")
-        urgencia = st.selectbox("Classificação de Urgência", ["Não Prioridade", "Prioridade", "Urgente"])
+        # OM: se temos base, usa autocomplete; senão, text_input
+        if display_to_sigla:
+            om_display = st.selectbox("OM solicitante (sigla)", [""] + sorted(display_to_sigla.keys()))
+            om_solicitante = display_to_sigla.get(om_display, "")
+        else:
+            om_solicitante = st.text_input("OM solicitante (sigla)").strip()
+
+        # Diretoria: se mapeada pela OM, preenche e desabilita
+        diretoria_auto = sigla_to_dir.get(om_solicitante, "")
+        if diretoria_auto:
+            diretoria = st.text_input("Diretoria responsável", value=diretoria_auto, disabled=True)
+        else:
+            diretoria = st.text_input("Diretoria responsável").strip()
+
+        tipo_vistoria = st.selectbox(
+            "Tipo de vistoria",
+            ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
+            index=0,
+        )
+
     with col2:
-        situacao = st.selectbox("Situação", ["Não Atendida", "Em andamento", "Finalizada"])
-        data_solic = st.date_input("DATA DA SOLICITAÇÃO", value=date.today())
-        data_vist = st.date_input("DATA DA VISTORIA", value=None)
+        local = st.text_input("Local / instalação").strip()
+        urgencia = st.selectbox("Urgência", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
+        data_limite = st.date_input("Data limite (se houver)", value=None)
 
-    st.markdown("### Complementares")
-    colA, colB = st.columns(2)
-    with colA:
-        ref_opus = st.text_input("REFERÊNCIA OPUS")
-        objetivo = st.text_input("OBJETIVO (ADICIONAR POSSÍVEL CONTATO)")
-        vt_exec = st.text_input("VT EXECUTADA POR")
-        status_sem = st.text_input("STATUS - ATUALIZAÇÃO SEMANAL")
-    with colB:
-        meio_resp = st.text_input("MEIO DE RESPOSTA DA SOLICITAÇÃO")
-        opus_vist = st.text_input("Nº OPUS DA VISTORIA (SE FOR O CASO)")
-        qt_total = st.number_input("QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO", min_value=0, step=1)
-        qt_exec = st.number_input("QUANTIDADE DE DIAS PARA EXECUÇÃO", min_value=0, step=1)
+    motivo = st.text_area("Motivo / justificativa (NAOM)", height=120)
 
-    obs = st.text_area("OBSERVAÇÕES", height=100)
-
+    # --- Validações (sem unsafe_allow_html) ---
     erros = []
-    if not objeto.strip(): erros.append("Informe o **OBJETO DE VISTORIA**.")
-    if not om_sigla: erros.append("Selecione/informe a **OM APOIADA**.")
-    if not diretoria.strip(): erros.append("Informe a **Diretoria Responsável**.")
+    if not om_solicitante:
+        erros.append("Informe a **OM solicitante**.")
+    if not local:
+        erros.append("Informe o **local/instalação**.")
+    if not (motivo or "").strip():
+        erros.append("Descreva o **motivo/justificativa**.")
 
     if erros:
-        st.warning("• " + "<br>• ".join(erros), unsafe_allow_html=True)
+        # avisar sem HTML; se quiser bullets bonitas, use st.markdown com unsafe_allow_html=True
+        st.warning("• " + "\n• ".join(erros))
 
     row = {
-        "OBJETO DE VISTORIA": objeto.strip(),
-        "OM APOIADA": om_sigla,
-        "Diretoria Responsável": diretoria.strip(),
+        "OBJETO DE VISTORIA": (motivo or "").strip(),  # ajuste se quiser outro campo como “objeto”
+        "OM APOIADA": om_solicitante,
+        "Diretoria Responsável": diretoria,
         "Classificação de Urgência": urgencia,
-        "Situação": situacao,
-        "DATA DA SOLICITAÇÃO": pd.to_datetime(data_solic).strftime("%Y-%m-%d"),
-        "DATA DA SOLICITAÇÃO_2": pd.to_datetime(data_solic).strftime("%Y-%m-%d"),
-        "REFERÊNCIA OPUS": ref_opus.strip(),
-        "OBJETIVO (ADICIONAR POSSÍVEL CONTATO)": objetivo.strip(),
-        "DATA DA VISTORIA": pd.to_datetime(data_vist).strftime("%Y-%m-%d") if data_vist else "",
-        "VT EXECUTADA POR": vt_exec.strip(),
-        "STATUS - ATUALIZAÇÃO SEMANAL": status_sem.strip(),
+        "Situação": "SOLICITADA",  # estado inicial
+        "DATA DA SOLICITAÇÃO": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "DATA DA SOLICITAÇÃO_2": data_limite.strftime("%Y-%m-%d") if data_limite else "",
+        "REFERÊNCIA OPUS": "",
+        "OBJETIVO (ADICIONAR POSSÍVEL CONTATO)": (motivo or "").strip(),
+        "DATA DA VISTORIA": "",
+        "VT EXECUTADA POR": "",
+        "STATUS - ATUALIZAÇÃO SEMANAL": "",
         "DATA/PREVISÃO DE CONCLUSÃO": "",
-        "MEIO DE RESPOSTA DA SOLICITAÇÃO": meio_resp.strip(),
+        "MEIO DE RESPOSTA DA SOLICITAÇÃO": "",
         "DATA DA RESPOSTA A SOLICITAÇÃO": "",
-        "Nº OPUS DA VISTORIA (SE FOR O CASO)": opus_vist.strip(),
-        "QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO": int(qt_total) if pd.notna(qt_total) else "",
-        "QUANTIDADE DE DIAS PARA EXECUÇÃO": int(qt_exec) if pd.notna(qt_exec) else "",
-        "OBSERVAÇÕES": obs.strip(),
+        "Nº OPUS DA VISTORIA (SE FOR O CASO)": "",
+        "QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO": "",
+        "QUANTIDADE DE DIAS PARA EXECUÇÃO": "",
+        "OBSERVAÇÕES": "",
     }
-    return row, (len(erros) == 0)
+    ok = (len(erros) == 0)
+    return row, ok
 
 
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
 
+    tabs_map = st.session_state.get("tabs_map", {})
+    tab_base = tabs_map.get("solicitacoes", "ACOMPANHAMENTO VISTORIAS")   # fonte de dados/dash
+    tab_valid = tabs_map.get("validacao", "Validacao_de_Dados")           # OMs oficiais
+    tab_save  = "ACOMPANHAMENTO VISTORIAS"                                 # destino do salvamento
+
+    # Carrega OMs para autocomplete (se existir)
     try:
-        base_preview = read_df(TAB_SOLICITACOES)
+        df_valid = read_df(tab_valid)
     except Exception:
-        base_preview = pd.DataFrame()
+        df_valid = pd.DataFrame()
 
-    row, ok = _input_row(base_preview)
+    # Normaliza nomes de colunas esperados para o autocomplete (adeque à sua aba de validação)
+    oms_df = pd.DataFrame()
+    if not df_valid.empty:
+        # tente mapear as colunas da validação (ajuste as opções conforme o seu sheet)
+        def pick(df, *cands):
+            for c in cands:
+                if c in df.columns:
+                    return c
+            # tentativa por contains
+            up = [c.upper() for c in df.columns]
+            for c in cands:
+                for i, u in enumerate(up):
+                    if c.upper() in u:
+                        return df.columns[i]
+            return None
 
-    if st.button("💾 Salvar na aba ACOMPANHAMENTO VISTORIAS", disabled=not ok, type="primary"):
+        c_sig = pick(df_valid, "OM", "Sigla", "OM Sigla")
+        c_nom = pick(df_valid, "Organização Militar", "OM Nome", "Nome")
+        c_dir = pick(df_valid, "Diretoria Responsável", "Diretoria", "DIR")
+
+        if c_sig:
+            oms_df = pd.DataFrame({
+                "om_sigla": df_valid[c_sig].astype(str),
+                "om_nome" : df_valid[c_nom].astype(str) if c_nom else "",
+                "diretoria": df_valid[c_dir].astype(str) if c_dir else "",
+            })
+
+    # --- Formulário ---
+    row, ok = _input_row(oms_df if not oms_df.empty else None)
+
+    # --- Salvar ---
+    if st.button("💾 Salvar na aba ACOMPANHAMENTO VISTORIAS", disabled=not ok):
         try:
-            append_row(TAB_SOLICITACOES, row)
-            st.success("Registro salvo na aba ACOMPANHAMENTO VISTORIAS.")
+            # limpa NaN -> "", e garante str
+            clean_row = {k: ("" if pd.isna(v) else str(v)) for k, v in row.items()}
+            append_row(tab_save, clean_row)
+            st.success("Registro salvo com sucesso na aba **ACOMPANHAMENTO VISTORIAS**.")
             st.rerun()
         except Exception as e:
             st.error(f"Falha ao salvar: {e}")
-
-    st.divider()
-    st.subheader("Visualização rápida da base (últimos 30)")
-    if not base_preview.empty:
-        cols_show = [c for c in [
-            "OBJETO DE VISTORIA","OM APOIADA","Diretoria Responsável",
-            "Classificação de Urgência","Situação","DATA DA SOLICITAÇÃO"
-        ] if c in base_preview.columns]
-        df_show = base_preview.copy()
-        if "DATA DA SOLICITAÇÃO" in df_show.columns:
-            df_show["_dt"] = pd.to_datetime(df_show["DATA DA SOLICITAÇÃO"], errors="coerce")
-            df_show = df_show.sort_values("_dt", ascending=False).drop(columns=["_dt"])
-        st.dataframe(df_show[cols_show].head(30), use_container_width=True, height=320)
-    else:
-        st.caption("Ainda não há registros.")
