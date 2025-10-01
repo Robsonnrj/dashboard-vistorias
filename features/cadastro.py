@@ -21,36 +21,22 @@ def _clean(x) -> str:
     return s
 
 
-def _pick(df: pd.DataFrame, *cands: str) -> str | None:
-    """Localiza uma coluna por nome exato ou por 'contains' (case-insensitive)."""
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return None
-    cols = list(df.columns)
-    up = [c.upper().strip() for c in cols]
-    # busca exata
-    for c in cands:
-        cu = c.upper().strip()
-        if cu in up:
-            return cols[up.index(cu)]
-    # contains
-    for c in cands:
-        cu = c.upper().strip()
-        for i, u in enumerate(up):
-            if cu in u:
-                return cols[i]
-    return None
-
-
 def _build_om_catalog() -> tuple[list[str], dict[str, str], dict[str, str]]:
     """
-    Lê SOMENTE a aba de validação (TAB_VALIDACAO) e monta:
+    Lê a aba de validação (TAB_VALIDACAO) e monta:
       - options: rótulos para o select (ex.: "1º BPE — 1º Batalhão ...")
       - disp2sig: rótulo -> sigla
       - sig2dir : sigla  -> diretoria
     """
     try:
-        df = read_df(TAB_VALIDACAO)
-    except Exception:
+        # Lê a aba de validação com header na linha 1 (índice 1)
+        df = read_df(TAB_VALIDACAO, header=1)
+        
+        # Se read_df não suportar o parâmetro header, use esta alternativa:
+        # df = pd.read_excel("caminho_do_arquivo.xlsx", sheet_name=TAB_VALIDACAO, header=1)
+        
+    except Exception as e:
+        st.warning(f"Erro ao carregar dados de validação: {e}")
         df = pd.DataFrame()
 
     options: list[str] = []
@@ -58,27 +44,47 @@ def _build_om_catalog() -> tuple[list[str], dict[str, str], dict[str, str]]:
     sig2dir: dict[str, str] = {}
 
     if not df.empty:
-        c_sig = _pick(df, "OM", "OM APOIADA", "SIGLA", "OM SIGLA", "Sigla")
-        c_nom = _pick(df, "Organização Militar", "Organizacao Militar", "OM NOME", "Nome")
-        c_dir = _pick(df, "Diretoria Responsável", "Diretoria", "DIR")
-
-        if c_sig and c_dir:
+        # As colunas estão como "Unnamed: X", então precisamos usar os índices
+        # Coluna 1: OM (sigla)
+        # Coluna 2: Organização Militar (nome completo)
+        # Coluna 3: Diretoria Responsável
+        
+        if len(df.columns) >= 4:
+            # Renomeia as colunas para facilitar
+            col_sig = df.columns[1]   # "Unnamed: 1" -> OM (sigla)
+            col_nome = df.columns[2]  # "Unnamed: 2" -> Organização Militar
+            col_dir = df.columns[3]   # "Unnamed: 3" -> Diretoria Responsável
+            
+            # Cria dataframe limpo
             tmp = pd.DataFrame({
-                "sig": df[c_sig].map(_clean),
-                "nome": df[c_nom].map(_clean) if c_nom else "",
-                "dir":  df[c_dir].map(_clean),
+                "sig": df[col_sig].map(_clean),
+                "nome": df[col_nome].map(_clean),
+                "dir": df[col_dir].map(_clean),
             })
-            tmp = tmp[(tmp["sig"] != "")].drop_duplicates("sig")
-
+            
+            # Remove linha de cabeçalho duplicada (NR, OM, Organização Militar...)
+            tmp = tmp[tmp["sig"] != "OM"]
+            tmp = tmp[tmp["sig"] != "NR"]
+            tmp = tmp[tmp["sig"] != ""]
+            
+            # Remove duplicatas
+            tmp = tmp.drop_duplicates("sig")
+            
+            # Cria as opções para o selectbox
             for _, r in tmp.iterrows():
-                label = f"{r['sig']} — {r['nome']}" if r["nome"] else r["sig"]
-                options.append(label)
-                disp2sig[label] = r["sig"]
-                sig2dir[r["sig"]] = r["dir"]
+                if r['sig']:  # Só adiciona se tiver sigla
+                    label = f"{r['sig']} — {r['nome']}" if r['nome'] else r['sig']
+                    options.append(label)
+                    disp2sig[label] = r["sig"]
+                    sig2dir[r["sig"]] = r["dir"] if r["dir"] else ""
 
+    # Ordena alfabeticamente
     options = sorted(options)
+    
+    # Adiciona opção para OM não listada
     options.append("Outra / não listada…")
     disp2sig["Outra / não listada…"] = ""
+    
     return options, disp2sig, sig2dir
 
 
@@ -138,7 +144,12 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
                 om_sigla = st.text_input("Informe a OM (sigla)", key="om_sigla_out").strip()
 
         # Diretoria sincronizada automaticamente pelo callback
-        diretoria = st.text_input("Diretoria responsável", key="dir_resp")
+        # Torna o campo editável caso o usuário precise ajustar
+        diretoria = st.text_input(
+            "Diretoria responsável", 
+            key="dir_resp",
+            help="Preenchimento automático. Você pode editar se necessário."
+        )
 
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria",
@@ -233,8 +244,15 @@ def _input_row(om_options: list[str], disp2sig: dict[str, str], sig2dir: dict[st
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
 
-    # Catálogo de OMs (sigla + diretoria automática) — SOMENTE da aba de validação
+    # Catálogo de OMs (sigla + diretoria automática) da aba Validacao_de_Dados
     om_options, disp2sig, sig2dir = _build_om_catalog()
+
+    # Debug (opcional - remova em produção)
+    if st.checkbox("🔍 Mostrar dados carregados (debug)", value=False):
+        st.info(f"Total de OMs carregadas: {len(om_options) - 1}")  # -1 por causa de "Outra/não listada"
+        with st.expander("Ver detalhes"):
+            st.write("**Opções disponíveis:**", om_options[:10])
+            st.write("**Mapeamento sigla -> diretoria:**", dict(list(sig2dir.items())[:10]))
 
     # Formulário
     row, ok = _input_row(om_options, disp2sig, sig2dir)
@@ -245,9 +263,9 @@ def page():
             # normaliza NaN -> "" e tudo como str
             clean_row = {k: ("" if pd.isna(v) else str(v)) for k, v in row.items()}
             append_row("ACOMPANHAMENTO VISTORIAS", clean_row)
-            st.success("Registro salvo com sucesso na aba **ACOMPANHAMENTO VISTORIAS**.")
+            st.success("✅ Registro salvo com sucesso na aba **ACOMPANHAMENTO VISTORIAS**.")
             # limpa o formulário para um novo cadastro
             _reset_form()
             st.rerun()
         except Exception as e:
-            st.error(f"Falha ao salvar: {e}")
+            st.error(f"❌ Falha ao salvar: {e}")
