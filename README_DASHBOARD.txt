@@ -24,6 +24,6 @@
 
 ## KPIs e Gráficos
 - Total de vistorias, % finalizadas, prazo médio total e de execução.
-- Evolução mensal, barras por Diretoria, pizza por Situação, barras por Urgência e tabela detalhada.
+- Evolução mensal, barras por Diretoria, pizza por Situação, barras por Urgência e tabela detalhada
 
-###teste teste teste
+#Isso é um teste
