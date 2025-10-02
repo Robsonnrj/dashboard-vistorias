@@ -32,8 +32,8 @@ def _load_oms_validadas() -> pd.DataFrame:
     """
     Lê a aba 'Validacao_de_Dados' e retorna colunas: om_sigla, om_nome, diretoria
     """
-    # se o header da planilha começa na 2ª linha, mantenha header=1; se for 1ª, use header=0.
-    df = read_df("Validacao_de_Dados", header=2)
+    # seus títulos estão na 1ª linha
+    df = read_df("Validacao_de_Dados", header=0)
 
     col_sigla = _find_col(df, "om", "sigla")
     col_nome  = _find_col(df, "organização militar", "organizacao militar", "om nome", "nome")
@@ -45,7 +45,6 @@ def _load_oms_validadas() -> pd.DataFrame:
         col_dir  : "diretoria",
     })[["om_sigla", "om_nome", "diretoria"]].copy()
 
-    # limpa
     for c in ["om_sigla", "om_nome", "diretoria"]:
         out[c] = out[c].astype(str).str.strip()
 
@@ -64,10 +63,9 @@ def _build_om_options(oms_df: pd.DataFrame):
         display = f"{sig} — {nom}" if nom else sig
         options_display.append(display)
 
-        # mapeamentos
         disp_to_sigla[display] = sig
         sigla_to_dir[sig] = dire
-        disp_to_dir[display] = dire  # <- chave: display
+        disp_to_dir[display] = dire   # <- chave: display
 
     options_display.append("Outra / não listada…")
     disp_to_sigla["Outra / não listada…"] = ""
@@ -89,6 +87,9 @@ def _input_row():
     options, disp2sig, sig2dir, disp2dir = _build_om_options(oms_df)
     st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
 
+    # garante chave no estado
+    st.session_state.setdefault("diretoria_auto", "")
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -108,13 +109,20 @@ def _input_row():
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
             st.session_state["diretoria_auto"] = ""
         else:
-            # usa o DISPLAY como chave -> evita diferenças de sigla
+            # prioridade: mapeamento direto pelo DISPLAY
             default_dir = disp2dir.get(om_display or "", "")
+
+            # fallback: se por algum motivo não vier, tenta pela SIGLA
+            if not default_dir:
+                default_dir = sig2dir.get(om_sigla or "", "")
+
+            # força o valor correto em TODO rerun
             st.session_state["diretoria_auto"] = default_dir
 
             st.text_input(
                 "Diretoria responsável *",
-                key="diretoria_auto",     # mesma chave do estado
+                key="diretoria_auto",
+                value=st.session_state.get("diretoria_auto", ""),
                 disabled=True
             )
             diretoria = st.session_state["diretoria_auto"]
