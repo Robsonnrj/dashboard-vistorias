@@ -54,17 +54,27 @@ def _load_oms_validadas() -> pd.DataFrame:
     return out
 
 def _build_om_options(oms_df: pd.DataFrame):
-    options_display, disp_to_sigla, sigla_to_dir = [], {}, {}
+    options_display, disp_to_sigla, sigla_to_dir, disp_to_dir = [], {}, {}, {}
+
     for _, r in oms_df.iterrows():
-        sig, nom, dire = r["om_sigla"], r["om_nome"], r["diretoria"]
+        sig  = str(r["om_sigla"]).strip()
+        nom  = str(r["om_nome"]).strip()
+        dire = str(r["diretoria"]).strip()
+
         display = f"{sig} — {nom}" if nom else sig
         options_display.append(display)
+
+        # mapeamentos
         disp_to_sigla[display] = sig
-        # se houver mais de uma diretoria para a mesma sigla, a última prevalece
         sigla_to_dir[sig] = dire
+        disp_to_dir[display] = dire  # <- chave: display
+
     options_display.append("Outra / não listada…")
     disp_to_sigla["Outra / não listada…"] = ""
-    return options_display, disp_to_sigla, sigla_to_dir
+    disp_to_dir["Outra / não listada…"] = ""
+
+    return options_display, disp_to_sigla, sigla_to_dir, disp_to_dir
+
 
 def _on_om_change(disp2sig: dict, sig2dir: dict):
     choice = st.session_state.get("om_choice")
@@ -76,7 +86,7 @@ def _on_om_change(disp2sig: dict, sig2dir: dict):
 def _input_row():
     st.subheader("📥 Nova solicitação de vistoria")
     oms_df = _load_oms_validadas()
-    options, disp2sig, sig2dir = _build_om_options(oms_df)
+    options, disp2sig, sig2dir, disp2dir = _build_om_options(oms_df)
     st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
 
     col1, col2 = st.columns(2)
@@ -91,31 +101,30 @@ def _input_row():
             key="om_choice",
         )
         om_sigla = disp2sig.get(om_display or "", "")
-    
+
         # 2) Diretoria: automática se OM conhecida; manual se "Outra…"
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
-            # zera o estado automático caso o usuário mude para "Outra…"
             st.session_state["diretoria_auto"] = ""
         else:
-            # <<< AQUI ESTÁ O PULO DO GATO >>>
-            # Define SEMPRE o valor correto da diretoria com base na sigla da OM selecionada
-            default_dir = sig2dir.get(om_sigla, "")
+            # usa o DISPLAY como chave -> evita diferenças de sigla
+            default_dir = disp2dir.get(om_display or "", "")
             st.session_state["diretoria_auto"] = default_dir
-    
+
             st.text_input(
                 "Diretoria responsável *",
-                key="diretoria_auto",   # mesma chave usada acima
+                key="diretoria_auto",     # mesma chave do estado
                 disabled=True
             )
             diretoria = st.session_state["diretoria_auto"]
-    
+
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria *",
             ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
             index=0,
         )
+
     with col2:
         local = st.text_input("Local / instalação *")
         urgencia = st.selectbox("Urgência *", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
@@ -154,7 +163,7 @@ def _input_row():
         "status_atual": "SOLICITADA",
     }
     return row, (len(erros) == 0)
-    
+
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
     tabs_map = st.session_state.get("tabs_map", {})
