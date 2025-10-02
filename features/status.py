@@ -181,9 +181,13 @@ def page():
     except Exception as e:
         st.error(f"Falha ao salvar: {e}")
 
-    # Trilha de auditoria
+    # Trilha de Auditoria
     st.subheader("📝 Trilha de Auditoria")
-    hist_df = _load_audit_trail((reg.get("numero") or reg.get("Numero") or ""))
+    
+    # evita TypeError com pd.NA usando _clean() antes do "or"
+    num = _clean(reg.get("numero", "")) or _clean(reg.get("Numero", ""))
+    
+    hist_df = _load_audit_trail(num)
     if hist_df.empty:
         st.info("Sem registros de auditoria para este número.")
     else:
