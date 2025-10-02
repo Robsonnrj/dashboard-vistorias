@@ -170,49 +170,77 @@ def page():
     options, disp2sig, sig2dir = _load_oms_map()
     reg = df.loc[idx].copy()
 
-    with st.form("frm_status"):
-        objeto = st.text_input("OBJETO DE VISTORIA *", value=_clean(reg.get(c_obj, "")))
+    form_uid = f"r{idx}"  # muda a cada registro selecionado
 
+    with st.form(f"frm_status_{form_uid}"):
+        objeto = st.text_input(
+            "OBJETO DE VISTORIA *",
+            value=_clean(reg.get(c_obj, "")),
+            key=f"obj_{form_uid}",
+        )
+    
         # default do select de OM (pelo valor salvo)
         om_default = next((k for k, v in disp2sig.items() if v == _clean(reg.get(c_om, ""))), None)
         default_index = options.index(om_default) if (om_default in options) else None
-
+    
         om_display = st.selectbox(
             "OM APOIADA *",
             options=options,
-            index=default_index,            # apenas uma vez
+            index=default_index,
             placeholder="Selecione…",
-            key="om_disp",
+            key=f"om_{form_uid}",
         )
         om_sigla = disp2sig.get(om_display or "", _clean(reg.get(c_om, "")))
-
+    
         diretoria = st.text_input(
             "Diretoria Responsável *",
-            value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, "")))
+            value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, ""))),
+            key=f"dir_{form_uid}",
         )
-
+    
         urg = st.selectbox(
             "Classificação de Urgência",
             URGENCIAS,
             index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0])))
-                  if _clean(reg.get(c_urg, "")) in URGENCIAS else 0
+                  if _clean(reg.get(c_urg, "")) in URGENCIAS else 0,
+            key=f"urg_{form_uid}",
         )
+    
         sit = st.selectbox(
             "Situação",
             SITUACOES,
             index=SITUACOES.index(_clean(reg.get(c_sit, SITUACOES[0])))
-                  if _clean(reg.get(c_sit, "")) in SITUACOES else 0
+                  if _clean(reg.get(c_sit, "")) in SITUACOES else 0,
+            key=f"sit_{form_uid}",
         )
-
-        dt_sol = st.date_input("DATA DA SOLICITAÇÃO", value=_date_or(reg.get(c_dtS, ""), date.today()))
-        dt_vis = st.date_input("DATA DA VISTORIA", value=_date_or(reg.get(c_dtV, ""), date.today()))
-
-        stw = st.text_input("STATUS - ATUALIZAÇÃO SEMANAL", value=_clean(reg.get(c_stw, "")))
-        obs = st.text_area("OBSERVAÇÕES", value=_clean(reg.get(c_obs, "")), height=100)
-
-        salvar = st.form_submit_button("💾 Atualizar registro", type="primary")
-
-      if not salvar:
+    
+        dt_sol = st.date_input(
+            "DATA DA SOLICITAÇÃO",
+            value=_date_or(reg.get(c_dtS, ""), date.today()),
+            key=f"dts_{form_uid}",
+        )
+        dt_vis = st.date_input(
+            "DATA DA VISTORIA",
+            value=_date_or(reg.get(c_dtV, ""), date.today()),
+            key=f"dtv_{form_uid}",
+        )
+    
+        stw = st.text_input(
+            "STATUS - ATUALIZAÇÃO SEMANAL",
+            value=_clean(reg.get(c_stw, "")),
+            key=f"stw_{form_uid}",
+        )
+        obs = st.text_area(
+            "OBSERVAÇÕES",
+            value=_clean(reg.get(c_obs, "")),
+            height=100,
+            key=f"obs_{form_uid}",
+        )
+    
+        salvar = st.form_submit_button("💾 Atualizar registro", type="primary", key=f"save_{form_uid}")
+    
+    
+          if not salvar:
         return
 
     # valida obrigatórios
