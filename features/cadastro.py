@@ -67,10 +67,9 @@ def _build_om_options(oms_df: pd.DataFrame):
     return options_display, disp_to_sigla, sigla_to_dir
 
 def _on_om_change(disp2sig: dict, sig2dir: dict):
-    """Quando a OM muda, atualiza a diretoria automática e limpa campos manuais."""
     choice = st.session_state.get("om_choice")
     sig = disp2sig.get(choice or "", "")
-    st.session_state["om_sigla_out"] = ""  # limpa o manual
+    st.session_state["om_sigla_out"] = ""
     st.session_state["diretoria_manual"] = ""
     st.session_state["diretoria_auto"] = sig2dir.get(sig, "")
 
@@ -99,15 +98,19 @@ def _input_row():
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
         else:
-            diretoria_auto = st.session_state.get("diretoria_auto", sig2dir.get(om_sigla, ""))
-            diretoria = diretoria_auto
-            st.text_input("Diretoria responsável *", value=diretoria_auto, disabled=True, key="diretoria_auto_show")
-
-        tipo_vistoria = st.selectbox(
-            "Tipo de vistoria *",
-            ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
-            index=0,
-        )
+            # garante o valor inicial mesmo antes do on_change
+            default_dir = sig2dir.get(om_sigla, "")
+            if "diretoria_auto" not in st.session_state:
+                st.session_state["diretoria_auto"] = default_dir
+            elif default_dir and st.session_state.get("om_choice") == om_display and not st.session_state["diretoria_auto"]:
+                st.session_state["diretoria_auto"] = default_dir
+        
+            st.text_input(
+                "Diretoria responsável *",
+                key="diretoria_auto",      # <- usa a MESMA chave do on_change
+                disabled=True
+            )
+            diretoria = st.session_state["diretoria_auto"]
 
     with col2:
         local = st.text_input("Local / instalação *")
