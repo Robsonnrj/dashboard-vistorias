@@ -2,7 +2,7 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import altair as alt  # opcional (usado no stacked opcional)
+import altair as alt  # opcional
 import unicodedata
 from core.data_loader import read_df
 from core.config import TAB_SOLICITACOES
@@ -16,39 +16,28 @@ def _pick(df: pd.DataFrame, candidates: list[str]) -> str | None:
     if df.empty:
         return None
     cols = list(df.columns)
-
-    def nf(s: str) -> str:
-        return s.casefold().strip()
-
+    def nf(s: str) -> str: return s.casefold().strip()
     # exato
     for c in candidates:
         for cc in cols:
-            if nf(cc) == nf(c):
-                return cc
+            if nf(cc) == nf(c): return cc
     # contém
     for c in candidates:
         target = nf(c)
         for cc in cols:
-            if target in nf(cc):
-                return cc
+            if target in nf(cc): return cc
     return None
 
-
 def _norm_txt(s: str) -> str:
-    """Normaliza strings para comparação: sem acento, maiúscula e trim."""
     s = "" if s is None else str(s)
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    s = unicodedata.normalize("NFKD", s).encode("ascii","ignore").decode("ascii")
     return s.strip().upper()
 
-
-# Exibição “bonita” para rótulos após normalização
 _MAP_DISPLAY_SIT = {
-    "AGENDADA": "Agendada",
-    "CONCLUIDA": "Concluída",
-    "CONCLUIDO": "Concluído",
-    "EM ANDAMENTO": "Em andamento",
-    "FINALIZADA": "Finalizada",
-    "FINALIZADO": "Finalizado",
+    "AGENDADA":"Agendada",
+    "CONCLUIDA":"Concluída", "CONCLUIDO":"Concluído",
+    "EM ANDAMENTO":"Em andamento",
+    "FINALIZADA":"Finalizada", "FINALIZADO":"Finalizado",
 }
 
 
@@ -58,251 +47,150 @@ _MAP_DISPLAY_SIT = {
 def page():
     st.header("📊 Dashboard Operacional — Seção de Vistorias")
 
-    # Carrega base
+    # Base
     try:
         df = read_df(TAB_SOLICITACOES)
     except Exception as e:
         st.error(f"Não foi possível ler a aba **{TAB_SOLICITACOES}**: {e}")
         return
-
     if df.empty:
         st.info("A aba está vazia.")
         return
 
-    # Mapeamento tolerante de colunas
-    c_obj = _pick(df, ["OBJETO DE VISTORIA", "OBJETO"])
-    c_om = _pick(df, ["OM APOIADA", "OM"])
-    c_dir = _pick(df, ["Diretoria Responsável", "Diretoria"])
-    c_urg = _pick(df, ["Classificação de Urgência", "Urgência"])
-    c_sit = _pick(df, ["Situação", "Status", "STATUS - ATUALIZAÇÃO SEMANAL"])
-    c_dt_s = _pick(df, ["DATA DA SOLICITAÇÃO", "Data", "DATA DA SOLICITAÇÃO_2"])
-    c_dt_v = _pick(df, ["DATA DA VISTORIA"])
-    c_dt_conc = _pick(df, ["DATA DE CONCLUSÃO", "DATA FINAL", "CONCLUÍDA EM"])
+    # Mapear colunas
+    c_dir   = _pick(df, ["Diretoria Responsável", "Diretoria"])
+    c_sit   = _pick(df, ["Situação", "Status", "STATUS - ATUALIZAÇÃO SEMANAL"])
+    c_urg   = _pick(df, ["Classificação da Urgência", "Urgência"])
+    c_dt_s  = _pick(df, ["DATA DA SOLICITAÇÃO", "Data", "DATA DA SOLICITAÇÃO_2"])
+    c_dt_v  = _pick(df, ["DATA DA VISTORIA"])
+    c_dt_c  = _pick(df, ["DATA DE CONCLUSÃO", "DATA FINAL", "CONCLUÍDA EM"])
+    c_dias_exec = _pick(df, ["QUANTIDADE DE DIAS PARA EXECUÇÃO", "DIAS EXECUCAO"])
+    c_dias_total = _pick(df, ["QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO", "DIAS ATENDIMENTO TOTAL"])
 
-    # Normalizações de datas (robustas e sem timezone)
-    for c in [c_dt_s, c_dt_v, c_dt_conc]:
+    # Datas -> datetime sem timezone
+    for c in [c_dt_s, c_dt_v, c_dt_c]:
         if c and c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors="coerce", utc=True)
-            # remove timezone (UTC) para evitar warnings no plotly/pandas
-            try:
-                df[c] = df[c].dt.tz_convert(None)
-            except Exception:
-                # se já estiver tz-naive, ignora
-                df[c] = df[c].dt.tz_localize(None)
+            df[c] = pd.to_datetime(df[c], errors="coerce")
+    # Números
+    for c in [c_dias_exec, c_dias_total]:
+        if c and c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
-    st.caption("Base: **{0}** • Registros: **{1}**".format(TAB_SOLICITACOES, len(df)))
+    st.caption(f"Base: **{TAB_SOLICITACOES}** • Registros: **{len(df)}**")
 
-    # ============================
-    # Filtros
-    # ============================
+    # ---------------- Filtros ----------------
     colF1, colF2, colF3 = st.columns(3)
     with colF1:
-        dir_sel = st.multiselect(
-            "Diretoria",
-            sorted(df[c_dir].dropna().astype(str).unique().tolist()) if c_dir else [],
-        )
+        dir_sel = st.multiselect("Diretoria",
+            sorted(df[c_dir].dropna().astype(str).unique().tolist()) if c_dir else [])
     with colF2:
-        sit_sel = st.multiselect(
-            "Situação",
-            sorted(df[c_sit].dropna().astype(str).unique().tolist()) if c_sit else [],
-        )
+        sit_sel = st.multiselect("Situação",
+            sorted(df[c_sit].dropna().astype(str).unique().tolist()) if c_sit else [])
     with colF3:
-        urg_sel = st.multiselect(
-            "Urgência",
-            sorted(df[c_urg].dropna().astype(str).unique().tolist()) if c_urg else [],
-        )
+        urg_sel = st.multiselect("Urgência",
+            sorted(df[c_urg].dropna().astype(str).unique().tolist()) if c_urg else [])
 
     dff = df.copy()
-    if c_dir and dir_sel:
-        dff = dff[dff[c_dir].astype(str).isin(dir_sel)]
-    if c_sit and sit_sel:
-        dff = dff[dff[c_sit].astype(str).isin(sit_sel)]
-    if c_urg and urg_sel:
-        dff = dff[dff[c_urg].astype(str).isin(urg_sel)]
+    if c_dir and dir_sel: dff = dff[dff[c_dir].astype(str).isin(dir_sel)]
+    if c_sit and sit_sel: dff = dff[dff[c_sit].astype(str).isin(sit_sel)]
+    if c_urg and urg_sel: dff = dff[dff[c_urg].astype(str).isin(urg_sel)]
 
-    # ============================
-    # KPIs
-    # ============================
+    # ---------------- KPIs ----------------
     colK1, colK2, colK3, colK4 = st.columns(4)
     total = len(dff)
-
     if c_sit and c_sit in dff.columns:
         _sit_norm = dff[c_sit].astype(str).map(_norm_txt)
-        pend = _sit_norm.str.contains("NAO ATENDIDA|SOLICITAD", regex=True, na=False).sum()
-        andam = _sit_norm.str.contains("ANDAMENT|EXECU", regex=True, na=False).sum()
-        fini = _sit_norm.str.contains("FINALIZ|CONCLUID", regex=True, na=False).sum()
+        pend  = _sit_norm.str.contains("NAO ATENDIDA|SOLICITAD", regex=True, na=False).sum()
+        andam = _sit_norm.str.contains("ANDAMENT|EXECU",        regex=True, na=False).sum()
+        fini  = _sit_norm.str.contains("FINALIZ|CONCLUID",       regex=True, na=False).sum()
     else:
         pend = andam = fini = 0
+    with colK1: st.metric("Total", f"{total:,}".replace(",", "."))
+    with colK2: st.metric("Pendentes", f"{pend:,}".replace(",", "."))
+    with colK3: st.metric("Em andamento", f"{andam:,}".replace(",", "."))
+    with colK4: st.metric("Finalizadas", f"{fini:,}".replace(",", "."))
 
-    with colK1:
-        st.metric("Total", f"{total:,}".replace(",", "."))
-    with colK2:
-        st.metric("Pendentes", f"{pend:,}".replace(",", "."))
-    with colK3:
-        st.metric("Em andamento", f"{andam:,}".replace(",", "."))
-    with colK4:
-        st.metric("Finalizadas", f"{fini:,}".replace(",", "."))
-
-    # ============================
-    # Gráficos categoriais
-    # ============================
     st.divider()
-    cols = st.columns(2)
 
-    if c_dir and c_dir in dff.columns:
-        with cols[0]:
-            tmp = dff.groupby(c_dir, as_index=False).size().sort_values("size", ascending=False)
-            st.plotly_chart(
-                px.bar(
-                    tmp,
-                    x=c_dir,
-                    y="size",
-                    title="Vistorias por Diretoria",
-                    labels={"size": "Vistorias"},
-                ),
-                use_container_width=True,
-            )
+    # =========================================================
+    # NOVOS GRÁFICOS “FUNÇÃO” (evolução temporal de desempenho)
+    # Substituem: Evolução Mensal e Evolução por Situação (contagens)
+    # =========================================================
 
-    if c_sit and c_sit in dff.columns:
-        with cols[1]:
-            tmp = dff.copy()
-            tmp["Sit_display"] = tmp[c_sit].astype(str).map(_norm_txt).map(
-                lambda x: _MAP_DISPLAY_SIT.get(x, x.title())
-            )
-            tmp = tmp.groupby("Sit_display", as_index=False).size()
-            st.plotly_chart(
-                px.pie(
-                    tmp,
-                    names="Sit_display",
-                    values="size",
-                    hole=0.45,
-                    title="Distribuição por Situação",
-                    labels={"size": "Vistorias"},
-                ),
-                use_container_width=True,
-            )
-
-    # ============================
-    # Evolução Mensal por DATA DA SOLICITAÇÃO
-    # ============================
-    if c_dt_s and c_dt_s in dff.columns:
-        base = dff.dropna(subset=[c_dt_s]).copy()
+    # -------- 1) Desempenho de Execução vs Data da Solicitação --------
+    if c_dt_s and c_dias_exec and (c_dt_s in dff.columns) and (c_dias_exec in dff.columns):
+        base = dff.dropna(subset=[c_dt_s, c_dias_exec]).copy()
         if not base.empty:
-            base["_MES"] = base[c_dt_s].dt.to_period("M")
-            mes_min, mes_max = base["_MES"].min(), base["_MES"].max()
-            full_periods = pd.period_range(mes_min, mes_max, freq="M")
-            base["_MES_STR"] = base["_MES"].astype(str)
+            # Dispersão por ponto (cada vistoria)
+            base["_Sit_display"] = (base[c_sit].astype(str).map(_norm_txt)
+                                    .map(lambda x: _MAP_DISPLAY_SIT.get(x, x.title()))
+                                    if c_sit in base.columns else "—")
 
-            # Total por mês (com meses ausentes = 0)
-            evol = (
-                base.groupby("_MES_STR", as_index=False)
-                .size()
-                .rename(columns={"_MES_STR": "MÊS", "size": "Vistorias"})
-                .set_index("MÊS")
-                .reindex(full_periods.astype(str), fill_value=0)
-                .reset_index()
-                .rename(columns={"index": "MÊS"})
+            fig_scatter = px.scatter(
+                base, x=c_dt_s, y=c_dias_exec, color="_Sit_display",
+                title="Dias para Execução × Data da Solicitação (ponto a ponto)",
+                labels={c_dt_s:"Data da Solicitação", c_dias_exec:"Dias para Execução", "_Sit_display":"Situação"},
+                hover_data=[c_dir] if c_dir in base.columns else None
             )
+            st.plotly_chart(fig_scatter, use_container_width=True)
 
-            fig = px.line(
-                evol, x="MÊS", y="Vistorias", markers=True, title="Evolução Mensal"
+            # Linha mensal (média) + média móvel (3 meses)
+            base["_MES"] = base[c_dt_s].dt.to_period("M").astype(str)
+            evol = (base.groupby("_MES", as_index=False)[c_dias_exec]
+                         .mean(numeric_only=True)
+                         .rename(columns={c_dias_exec:"Dias Médios Execução"}))
+            # preencher meses ausentes
+            pr = pd.period_range(base[c_dt_s].min().to_period("M"), base[c_dt_s].max().to_period("M"), freq="M")
+            evol = (evol.set_index("_MES")
+                        .reindex(pr.astype(str))
+                        .rename_axis("_MES").reset_index())
+            evol["Dias Médios Execução"] = evol["Dias Médios Execução"].astype(float)
+            # média móvel
+            evol["Média Móvel (3m)"] = evol["Dias Médios Execução"].rolling(3, min_periods=1).mean()
+
+            fig_line = px.line(
+                evol, x="_MES", y=["Dias Médios Execução","Média Móvel (3m)"],
+                markers=True, title="Tendência Mensal — Dias para Execução",
+                labels={"_MES":"Mês", "value":"Dias"}
             )
-            fig.update_layout(
-                xaxis_title="DATA DA SOLICITAÇÃO",
-                yaxis_title="Vistorias",
-                xaxis=dict(
-                    type="category",
-                    categoryorder="array",
-                    categoryarray=full_periods.astype(str).tolist(),
-                ),
+            fig_line.update_layout(xaxis=dict(type="category", categoryorder="array", categoryarray=pr.astype(str).tolist()))
+            st.plotly_chart(fig_line, use_container_width=True)
+
+    st.divider()
+
+    # -------- 2) Desempenho de Atendimento Total vs Data de Conclusão --------
+    if c_dt_c and c_dias_total and (c_dt_c in dff.columns) and (c_dias_total in dff.columns):
+        base2 = dff.dropna(subset=[c_dt_c, c_dias_total]).copy()
+        if not base2.empty:
+            base2["_Sit_display"] = (base2[c_sit].astype(str).map(_norm_txt)
+                                     .map(lambda x: _MAP_DISPLAY_SIT.get(x, x.title()))
+                                     if c_sit in base2.columns else "—")
+
+            fig_scatter2 = px.scatter(
+                base2, x=c_dt_c, y=c_dias_total, color="_Sit_display",
+                title="Dias para Atendimento Total × Data de Conclusão (ponto a ponto)",
+                labels={c_dt_c:"Data de Conclusão", c_dias_total:"Dias p/ Atendimento Total", "_Sit_display":"Situação"},
+                hover_data=[c_dir] if c_dir in base2.columns else None
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig_scatter2, use_container_width=True)
 
-            # Evolução Mensal por Situação (stack) — mais visível com poucos meses
-            if c_sit and c_sit in base.columns:
-                base_sit = base.copy()
-                base_sit["Sit"] = base_sit[c_sit].astype(str).map(_norm_txt)
+            base2["_MES"] = base2[c_dt_c].dt.to_period("M").astype(str)
+            evol2 = (base2.groupby("_MES", as_index=False)[c_dias_total]
+                           .mean(numeric_only=True)
+                           .rename(columns={c_dias_total:"Dias Médios Atendimento"}))
+            pr2 = pd.period_range(base2[c_dt_c].min().to_period("M"), base2[c_dt_c].max().to_period("M"), freq="M")
+            evol2 = (evol2.set_index("_MES")
+                         .reindex(pr2.astype(str))
+                         .rename_axis("_MES").reset_index())
+            evol2["Dias Médios Atendimento"] = evol2["Dias Médios Atendimento"].astype(float)
+            evol2["Média Móvel (3m)"] = evol2["Dias Médios Atendimento"].rolling(3, min_periods=1).mean()
 
-                por_sit = (
-                    base_sit.groupby(["_MES_STR", "Sit"], as_index=False)
-                    .size()
-                    .rename(columns={"_MES_STR": "MÊS", "size": "Vistorias"})
-                )
-
-                if not por_sit.empty:
-                    todas_sit = sorted(por_sit["Sit"].unique().tolist())
-                    idx = pd.MultiIndex.from_product(
-                        [full_periods.astype(str), todas_sit], names=["MÊS", "Sit"]
-                    )
-                    por_sit = (
-                        por_sit.set_index(["MÊS", "Sit"])
-                        .reindex(idx, fill_value=0)
-                        .reset_index()
-                    )
-                    por_sit["Vistorias"] = por_sit["Vistorias"].astype(int)
-                    por_sit["Sit_display"] = por_sit["Sit"].map(
-                        lambda x: _MAP_DISPLAY_SIT.get(x, x.title())
-                    )
-
-                    fig2 = px.bar(
-                        por_sit,
-                        x="MÊS",
-                        y="Vistorias",
-                        color="Sit_display",
-                        barmode="stack",
-                        title="Evolução Mensal por Situação",
-                        labels={"Vistorias": "Vistorias", "Sit_display": "Situação"},
-                    )
-                    fig2.update_layout(
-                        xaxis_title="DATA DA SOLICITAÇÃO",
-                        xaxis=dict(
-                            type="category",
-                            categoryorder="array",
-                            categoryarray=full_periods.astype(str).tolist(),
-                        ),
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
-
-    # ============================
-    # Evolução de Concluídas por DATA DE CONCLUSÃO
-    # ============================
-    if c_dt_conc and c_sit and (c_dt_conc in dff.columns) and (c_sit in dff.columns):
-        concluidas = dff.copy()
-        concluidas["_SIT_N"] = concluidas[c_sit].astype(str).map(_norm_txt)
-        concluidas = concluidas[
-            concluidas["_SIT_N"].str.contains("CONCLUID|FINALIZ", regex=True, na=False)
-        ].dropna(subset=[c_dt_conc])
-
-        if not concluidas.empty:
-            concluidas["_MES_CONC"] = concluidas[c_dt_conc].dt.to_period("M")
-            conc_min, conc_max = concluidas["_MES_CONC"].min(), concluidas["_MES_CONC"].max()
-            full_conc = pd.period_range(conc_min, conc_max, freq="M")
-            concluidas["_MES_CONC_STR"] = concluidas["_MES_CONC"].astype(str)
-
-            evol_conc = (
-                concluidas.groupby("_MES_CONC_STR", as_index=False)
-                .size()
-                .rename(columns={"_MES_CONC_STR": "MÊS_CONC", "size": "Concluídas"})
-                .set_index("MÊS_CONC")
-                .reindex(full_conc.astype(str), fill_value=0)
-                .reset_index()
-                .rename(columns={"index": "MÊS_CONC"})
+            fig_line2 = px.line(
+                evol2, x="_MES", y=["Dias Médios Atendimento","Média Móvel (3m)"],
+                markers=True, title="Tendência Mensal — Dias para Atendimento Total",
+                labels={"_MES":"Mês", "value":"Dias"}
             )
+            fig_line2.update_layout(xaxis=dict(type="category", categoryorder="array", categoryarray=pr2.astype(str).tolist()))
+            st.plotly_chart(fig_line2, use_container_width=True)
 
-            fig_conc = px.line(
-                evol_conc,
-                x="MÊS_CONC",
-                y="Concluídas",
-                markers=True,
-                title="Vistorias Concluídas por Mês",
-            )
-            fig_conc.update_layout(
-                xaxis_title="MÊS DE CONCLUSÃO",
-                yaxis_title="Vistorias Concluídas",
-                xaxis=dict(
-                    type="category",
-                    categoryorder="array",
-                    categoryarray=full_conc.astype(str).tolist(),
-                ),
-            )
-            st.plotly_chart(fig_conc, use_container_width=True)
+    # (opcional) se quiser manter os gráficos antigos, coloque-os abaixo de um st.expander().
