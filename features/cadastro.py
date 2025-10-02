@@ -199,6 +199,9 @@ def _input_row():
 # Página principal
 # ===============================
 def page():
+
+    if "main_menu" not in st.session_state:
+        st.session_state["main_menu"] = "📊 Dashboard"
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
     tabs_map = st.session_state.get("tabs_map", {})
     tab_solic = tabs_map.get("solicitacoes", "ACOMPANHAMENTO VISTORIAS")
