@@ -21,6 +21,7 @@ MENU = option_menu(
     ["📊 Dashboard", "📝 Cadastro", "🧾 Status/Auditoria"],
     icons=["bar-chart", "file-plus", "list-check"],
     default_index=0,
+    key="main_menu", # adicionar chave para armazenar seleção
 )
 
 if MENU == "📊 Dashboard":
