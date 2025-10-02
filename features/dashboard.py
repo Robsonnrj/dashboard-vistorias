@@ -105,61 +105,61 @@ def page():
                                    title="Distribuição por Situação",
                                    labels={"size": "Vistorias"}), use_container_width=True)
 
-    # Evolução Mensal (corrigido/robusto)
+    
+    # Evolução Mensal (forçando eixo categórico YYYY-MM)
     if c_dt_s:
         base = dff.dropna(subset=[c_dt_s]).copy()
         if not base.empty:
-            # mês normalizado (primeiro dia do mês)
-            base["_MES"] = base[c_dt_s].dt.to_period("M").dt.to_timestamp()
-
-            evol = (base.groupby("_MES", as_index=False)
-                        .size()
-                        .rename(columns={"_MES": "MES", "size": "Vistorias"})
-                        .sort_values("MES"))
-
-            # sequência contínua de meses entre min e max
-            if not evol.empty:
-                idx = pd.period_range(evol["MES"].min(), evol["MES"].max(), freq="M").to_timestamp()
-                evol = (evol.set_index("MES")
-                             .reindex(idx, fill_value=0)
-                             .rename_axis("MES")
-                             .reset_index())
-
-            st.plotly_chart(
-                px.line(evol, x="MES", y="Vistorias", markers=True,
-                        title="Evolução Mensal").update_layout(xaxis_title="DATA DA SOLICITAÇÃO",
-                                                              yaxis_title="Vistorias"),
-                use_container_width=True,
+            # mês como Period (não datetime) e string para eixo categórico
+            base["_MES"] = base[c_dt_s].dt.to_period("M")
+            month_order = sorted(base["_MES"].unique().tolist())
+            base["_MES_STR"] = base["_MES"].astype(str)        # ex.: '2025-10'
+    
+            # total por mês (com todos os meses no intervalo)
+            evol = (
+                base.groupby("_MES_STR", as_index=False)
+                    .size()
+                    .rename(columns={"_MES_STR": "MÊS", "size": "Vistorias"})
             )
-
-            # ----- (opcional) evolução mensal por Situação empilhada -----
+            # garante sequência contínua de meses
+            full_months = [str(m) for m in month_order]
+            evol = (evol.set_index("MÊS")
+                        .reindex(full_months, fill_value=0)
+                        .rename_axis("MÊS")
+                        .reset_index())
+    
+            fig = px.line(evol, x="MÊS", y="Vistorias", markers=True, title="Evolução Mensal")
+            fig.update_layout(
+                xaxis_title="DATA DA SOLICITAÇÃO",
+                yaxis_title="Vistorias",
+                xaxis=dict(type="category", categoryorder="array", categoryarray=full_months),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+            # --- (opcional) Evolução Mensal por Situação (empilhado) ---
             if c_sit:
-                por_sit = (base.assign(SITUACAO=base[c_sit].astype(str).str.strip())
-                               .groupby(["_MES", "SITUACAO"], as_index=False)
-                               .size()
-                               .rename(columns={"_MES": "MES", "size": "Vistorias"}))
-
+                por_sit = (
+                    base.assign(Sit=base[c_sit].astype(str).str.strip())
+                        .groupby(["_MES_STR", "Sit"], as_index=False)
+                        .size()
+                        .rename(columns={"_MES_STR": "MÊS", "size": "Vistorias"})
+                )
+    
                 if not por_sit.empty:
-                    meses = pd.period_range(por_sit["MES"].min(), por_sit["MES"].max(), freq="M").to_timestamp()
-                    todas_sit = sorted(por_sit["SITUACAO"].unique().tolist())
-                    idx = pd.MultiIndex.from_product([meses, todas_sit], names=["MES", "SITUACAO"])
-                    por_sit = (por_sit.set_index(["MES", "SITUACAO"])
-                                     .reindex(idx, fill_value=0)
+                    # completa grade MÊS x Situação com zeros
+                    todas_sit = sorted(por_sit["Sit"].unique().tolist())
+                    full_idx = pd.MultiIndex.from_product([full_months, todas_sit], names=["MÊS", "Sit"])
+                    por_sit = (por_sit.set_index(["MÊS", "Sit"])
+                                     .reindex(full_idx, fill_value=0)
                                      .reset_index())
-
-                    # usando altair para área empilhada (poderia ser plotly também)
-                    chart_sit = (
-                        alt.Chart(por_sit)
-                           .mark_area()
-                           .encode(
-                               x=alt.X("MES:T", title="DATA DA SOLICITAÇÃO", axis=alt.Axis(format="%b %Y")),
-                               y=alt.Y("Vistorias:Q", stack="zero", title="Vistorias"),
-                               color=alt.Color("SITUACAO:N", title="Situação")
-                           )
-                           .properties(title="Evolução Mensal por Situação", height=260)
+    
+                    fig2 = px.area(
+                        por_sit, x="MÊS", y="Vistorias", color="Sit",
+                        title="Evolução Mensal por Situação"
                     )
-                    st.altair_chart(chart_sit, use_container_width=True)
-
-    st.subheader("📄 Registros (completos)")
-    # Mostra a tabela inteira, sem truncar para 50
-    st.dataframe(dff, use_container_width=True, height=500)
+                    fig2.update_layout(
+                        xaxis_title="DATA DA SOLICITAÇÃO",
+                        yaxis_title="Vistorias",
+                        xaxis=dict(type="category", categoryorder="array", categoryarray=full_months),
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
