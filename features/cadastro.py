@@ -232,6 +232,7 @@ def page():
             st.rerun()
     with col_btn3:
         if st.button("📊 Ver Dashboard", use_container_width=True):
-            st.info("Redirecionar para dashboard implementado aqui")
+            st.session_state["current_page"] = "dashboard"
+            st.experimental_rerun()
 
 
