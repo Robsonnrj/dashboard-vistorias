@@ -232,7 +232,7 @@ def page():
             st.rerun()
     with col_btn3:
         if st.button("📊 Ver Dashboard", use_container_width=True):
-            st.session_state['main_menu'] = "📊 Dashboard" #altera o menu
+            st.session_state['main_menu'] = "📊 Dashboard" 
             st.experimental_rerun() #froça rerun para atualizar a página
 
 
