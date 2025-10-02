@@ -19,7 +19,7 @@ with st.sidebar:
     if st.button("🔄 Atualizar dados (limpar cache)"):
         clear_caches()
         st.toast("Cache limpo. Recarregando…")
-        st.rerun()
+        st.experimental_rerun()
 
 # Menu lateral / topo
 MENU = option_menu(
