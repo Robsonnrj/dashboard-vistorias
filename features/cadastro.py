@@ -13,16 +13,11 @@ def _normalize(text: str) -> str:
     return str(text).strip().lower()
 
 def _find_column(df: pd.DataFrame, *column_names: str) -> str:
-    """
-    Busca uma coluna no dataframe pelo nome exato ou parcial (case insensitive).
-    Retorna o nome exato da coluna encontrada.
-    """
     columns_map = {_normalize(c): c for c in df.columns}
     for name in column_names:
         norm_name = _normalize(name)
         if norm_name in columns_map:
             return columns_map[norm_name]
-    # busca parcial
     for name in column_names:
         norm_name = _normalize(name)
         for norm_col, orig_col in columns_map.items():
@@ -38,7 +33,6 @@ def _load_oms_validadas() -> pd.DataFrame:
     df_raw = read_df("Validacao_de_Dados")
 
     def _try_promote_header(df: pd.DataFrame) -> pd.DataFrame:
-        # Promove primeira linha para header se necessário (detecção básica)
         if df.empty:
             return df
         first_row = df.iloc[0].astype(str).str.lower()
@@ -53,7 +47,6 @@ def _load_oms_validadas() -> pd.DataFrame:
 
     df = _try_promote_header(df_raw)
 
-    # Detecta colunas principais
     try:
         col_sigla = _find_column(df, "om", "sigla")
         col_nome = _find_column(df, "organização militar", "organizacao militar", "om nome", "nome")
@@ -62,7 +55,6 @@ def _load_oms_validadas() -> pd.DataFrame:
         st.error("Erro ao localizar colunas OM, Nome ou Diretoria na aba de validação.")
         return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
 
-    # Extrai e limpa dados das colunas
     out = df[[col_sigla, col_nome, col_diretoria]].copy()
     out.columns = ["om_sigla", "om_nome", "diretoria"]
     for c in out.columns:
@@ -72,9 +64,6 @@ def _load_oms_validadas() -> pd.DataFrame:
 
     return out
 
-# ===============================
-# Constrói opções para select e dicionários auxiliares
-# ===============================
 def _build_om_options(oms_df: pd.DataFrame):
     options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria = [], {}, {}, {}
 
@@ -147,6 +136,21 @@ def _input_row():
 
     motivo = st.text_area("Motivo / justificativa (NAOM) *", height=120)
 
+    # Campos complementares opcionais
+    with st.expander("📋 Campos Complementares (opcional)", expanded=False):
+        referencia_opus = st.text_input("REFERÊNCIA OPUS")
+        objetivo_contato = st.text_input("OBJETIVO (ADICIONAR POSSÍVEL CONTATO)")
+        vt_exec_por = st.text_input("VT EXECUTADA POR")
+        status_atual = st.text_input("STATUS - ATUALIZAÇÃO SEMANAL")
+        obs = st.text_area("OBSERVAÇÕES", height=90)
+        data_vistoria = st.date_input("DATA DA VISTORIA", value=None)
+        data_prev_conc = st.date_input("DATA/PREVISÃO DE CONCLUSÃO", value=None)
+        meio_resposta = st.text_input("MEIO DE RESPOSTA DA SOLICITAÇÃO")
+        data_resposta = st.date_input("DATA DA RESPOSTA A SOLICITAÇÃO", value=None)
+        num_opus = st.text_input("Nº OPUS DA VISTORIA (SE FOR O CASO)")
+        qd_total = st.number_input("QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO", min_value=0, step=1, value=0)
+        qd_exec = st.number_input("QUANTIDADE DE DIAS PARA EXECUÇÃO", min_value=0, step=1, value=0)
+
     erros = []
     if not (om_sigla or "").strip():
         erros.append("Informe a **OM**.")
@@ -175,6 +179,18 @@ def _input_row():
         "data_limite": data_limite.strftime("%Y-%m-%d") if data_limite else "",
         "motivo": (motivo or "").strip(),
         "status_atual": "SOLICITADA",
+        "REFERÊNCIA OPUS": referencia_opus.strip(),
+        "OBJETIVO (ADICIONAR POSSÍVEL CONTATO)": objetivo_contato.strip(),
+        "VT EXECUTADA POR": vt_exec_por.strip(),
+        "STATUS - ATUALIZAÇÃO SEMANAL": status_atual.strip(),
+        "DATA DA VISTORIA": data_vistoria.strftime("%Y-%m-%d") if data_vistoria else "",
+        "DATA/PREVISÃO DE CONCLUSÃO": data_prev_conc.strftime("%Y-%m-%d") if data_prev_conc else "",
+        "MEIO DE RESPOSTA DA SOLICITAÇÃO": meio_resposta.strip(),
+        "DATA DA RESPOSTA A SOLICITAÇÃO": data_resposta.strftime("%Y-%m-%d") if data_resposta else "",
+        "Nº OPUS DA VISTORIA (SE FOR O CASO)": num_opus.strip(),
+        "QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO": str(int(qd_total)) if qd_total else "",
+        "QUANTIDADE DE DIAS PARA EXECUÇÃO": str(int(qd_exec)) if qd_exec else "",
+        "OBSERVAÇÕES": obs.strip(),
     }
 
     return row, (len(erros) == 0)
@@ -194,29 +210,38 @@ def page():
 
     row, ok = _input_row()
 
-    if st.button("💾 Salvar solicitação", type="primary", disabled=not ok):
-        try:
-            proximo = 1
-            if not df_existente.empty and "numero" in df_existente.columns:
-                nums = pd.to_numeric(df_existente["numero"], errors="coerce").dropna()
-                if not nums.empty:
-                    proximo = int(nums.max()) + 1
-            row["numero"] = str(proximo)
-            append_row(tab_solic, row)
-            st.success(f"Solicitação **#{row['numero']}** cadastrada com sucesso!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Falha ao salvar: {e}")
-# Botões de ação na parte inferior
+    # Botões de ação
     col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
     with col_btn1:
-        st.button("💾 Salvar Solicitação", type="primary", disabled=not ok, use_container_width=True)
+        if st.button("💾 Salvar Solicitação", type="primary", disabled=not ok, use_container_width=True):
+            try:
+                proximo = 1
+                if not df_existente.empty and "numero" in df_existente.columns:
+                    nums = pd.to_numeric(df_existente["numero"], errors="coerce").dropna()
+                    if not nums.empty:
+                        proximo = int(nums.max()) + 1
+                row["numero"] = str(proximo)
+                append_row(tab_solic, row)
+                st.success(f"Solicitação **#{row['numero']}** cadastrada com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Falha ao salvar: {e}")
     with col_btn2:
         if st.button("🧹 Limpar Formulário", use_container_width=True):
             st.session_state.clear()
             st.rerun()
     with col_btn3:
         if st.button("📊 Ver Dashboard", use_container_width=True):
-            # Se estiver usando multipágina: st.switch_page("pages/dashboard.py")
             st.info("Redirecionar para dashboard implementado aqui")
-            
+
+    st.divider()
+    st.subheader("📄 Últimas solicitações")
+
+    if not df_existente.empty:
+        c_data = next((c for c in df_existente.columns if "data" in c.lower()), None)
+        if c_data:
+            df_existente[c_data] = pd.to_datetime(df_existente[c_data], errors="coerce")
+            df_existente = df_existente.sort_values(c_data, ascending=False)
+        st.dataframe(df_existente.head(50), use_container_width=True, height=360)
+    else:
+        st.caption("Ainda não há registros.")
