@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import datetime
 from core.config import TAB_SOLICITACOES, TAB_AUDIT, TAB_VALIDACAO
 from core.data_loader import read_df, overwrite_tab_from_df
 
@@ -20,6 +20,64 @@ def _date_or(x, default: date) -> date:
     """Converte para date; se inválido/NaT, retorna 'default'."""
     d = pd.to_datetime(x, errors="coerce")
     return d.date() if pd.notna(d) else default
+
+AUDIT_FIELDS = [
+    "objeto de vistoria", "om apoiada", "diretoria responsável",
+    "classificação de urgência", "situação",
+    "data da solicitação", "data da vistoria",
+    "status - atualização semanal", "observações",
+]
+
+def _now_ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _append_audit(numero: str, changes: dict):
+    """
+    Adiciona 1 linha por campo alterado na aba de auditoria (TAB_AUDIT).
+    Espera: changes = {nome_campo: (valor_antigo, valor_novo), ...}
+    """
+    if not changes:
+        return
+    try:
+        hist = read_df(TAB_AUDIT)
+    except Exception:
+        hist = pd.DataFrame()
+
+    rows = []
+    for campo, (antes, depois) in changes.items():
+        rows.append({
+            "numero": str(numero),
+            "ts": _now_ts(),
+            "campo": campo,
+            "antes": "" if pd.isna(antes) else str(antes),
+            "depois": "" if pd.isna(depois) else str(depois),
+        })
+
+    new_hist = (pd.concat([hist, pd.DataFrame(rows)], ignore_index=True)
+                if not hist.empty else pd.DataFrame(rows))
+
+    # salva de volta (mantendo cabeçalho)
+    overwrite_tab_from_df(TAB_AUDIT, new_hist, keep_header=True)
+
+def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) -> dict:
+    """
+    Compara valores antigos x novos e retorna um dict
+    {nome_campo_humano: (antes, depois)} apenas para os que mudaram.
+    """
+    changes = {}
+    # mapeia nomes humanos -> nomes de coluna reais no DF
+    for human in AUDIT_FIELDS:
+        col_real = cols_map.get(human)
+        if not col_real:
+            continue
+        old = orig_row.get(col_real, "")
+        new = new_row.get(col_real, "")
+        # normaliza para comparar
+        old_s = "" if pd.isna(old) else str(old).strip()
+        new_s = "" if pd.isna(new) else str(new).strip()
+        if old_s != new_s:
+            changes[human] = (old_s, new_s)
+    return changes
 
 def _load_oms_map():
     """Monta opções de OM e mapas display->sigla e sigla->diretoria."""
@@ -154,9 +212,10 @@ def page():
 
         salvar = st.form_submit_button("💾 Atualizar registro", type="primary")
 
-    if not salvar:
+      if not salvar:
         return
 
+    # valida obrigatórios
     faltando = []
     if not objeto:    faltando.append("OBJETO DE VISTORIA")
     if not om_sigla:  faltando.append("OM APOIADA")
@@ -165,18 +224,64 @@ def page():
         st.error("Preencha os campos obrigatórios: " + ", ".join(faltando))
         return
 
-    if c_obj: df.at[idx, c_obj] = objeto
-    if c_om:  df.at[idx, c_om]  = om_sigla
-    if c_dir: df.at[idx, c_dir] = diretoria
-    if c_urg: df.at[idx, c_urg] = urg
-    if c_sit: df.at[idx, c_sit] = sit
-    if c_dtS: df.at[idx, c_dtS] = pd.to_datetime(dt_sol).strftime("%Y-%m-%d")
-    if c_dtV: df.at[idx, c_dtV] = pd.to_datetime(dt_vis).strftime("%Y-%m-%d") if dt_vis else ""
-    if c_stw: df.at[idx, c_stw] = stw
-    if c_obs: df.at[idx, c_obs] = obs
+    # ----- prepara atualização do DF principal -----
+    # monta um "row novo" só com os campos relevantes
+    new_vals = {}
+    if c_obj: new_vals[c_obj] = objeto
+    if c_om:  new_vals[c_om]  = om_sigla
+    if c_dir: new_vals[c_dir] = diretoria
+    if c_urg: new_vals[c_urg] = urg
+    if c_sit: new_vals[c_sit] = sit
+    if c_dtS: new_vals[c_dtS] = pd.to_datetime(dt_sol).strftime("%Y-%m-%d")
+    if c_dtV: new_vals[c_dtV] = pd.to_datetime(dt_vis).strftime("%Y-%m-%d") if dt_vis else ""
+    if c_stw: new_vals[c_stw] = stw
+    if c_obs: new_vals[c_obs] = obs
 
+    # localiza a linha pelo "numero" se existir; senão usa o índice selecionado
+    cols_all = {c.lower(): c for c in df.columns}
+    c_num = cols_all.get("numero")
+    if c_num and c_num in df.columns and str(df.at[idx, c_num]).strip():
+        numero = str(df.at[idx, c_num]).strip()
+        ixs = df.index[df[c_num].astype(str).str.strip() == numero]
+        if len(ixs) > 0:
+            idx_target = ixs[0]
+        else:
+            idx_target = idx  # fallback
+    else:
+        numero = str(df.index.get_loc(idx))  # sem coluna numero; usa posição como id
+        idx_target = idx
+
+    # coleta changes (diff) para auditoria ANTES de escrever
+    cols_human_to_real = {
+        "objeto de vistoria": c_obj,
+        "om apoiada": c_om,
+        "diretoria responsável": c_dir,
+        "classificação de urgência": c_urg,
+        "situação": c_sit,
+        "data da solicitação": c_dtS,
+        "data da vistoria": c_dtV,
+        "status - atualização semanal": c_stw,
+        "observações": c_obs,
+    }
+    orig_row = df.loc[idx_target].copy()
+    # cria uma série com os novos valores para comparar
+    new_row = orig_row.copy()
+    for k, v in new_vals.items():
+        new_row[k] = v
+    changes = _collect_changes(orig_row, new_row, cols_human_to_real)
+
+    # aplica atualização na linha alvo
+    for k, v in new_vals.items():
+        df.at[idx_target, k] = v
+
+    # grava DF de volta e registra auditoria
     try:
         overwrite_tab_from_df(TAB_SOLICITACOES, df, keep_header=True)
+        _append_audit(numero, changes)
+        st.success("Registro atualizado com sucesso.")
+    except Exception as e:
+        st.error(f"Falha ao salvar: {e}")
+
         st.success("Registro atualizado com sucesso.")
     except Exception as e:
         st.error(f"Falha ao salvar: {e}")
