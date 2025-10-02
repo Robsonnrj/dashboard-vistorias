@@ -61,50 +61,68 @@ def _input_row(oms_df: pd.DataFrame):
     st.subheader("📥 Nova solicitação de vistoria")
     options, disp2sig, sig2dir = _build_om_options(oms_df)
     col1, col2 = st.columns(2)
+
+    # OM selecionada
     with col1:
         om_display = st.selectbox(
             "OM solicitante",
             options=options,
             index=None,
             placeholder="Selecione ou digite…",
-            help="Escolha a OM ou selecione 'Outra / não listada…' para inserir manualmente."
+            key="om_choice"
         )
         om_sigla = disp2sig.get(om_display, "")
-        diretoria_auto = sig2dir.get(om_sigla, "")
+        # Atualiza sempre o valor da diretoria no session_state, para OM conhecida
+        if om_display != "Outra / não listada…":
+            st.session_state["diretoria_atual"] = sig2dir.get(om_sigla, "")
+        else:
+            st.session_state["diretoria_atual"] = ""
+
+        # Campo diretoria, manual se OM desconhecida, automático no resto
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", "")
-            diretoria = st.text_input("Diretoria responsável (manual)", "")
-            diretoria_field_disabled = False
+            diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
         else:
             diretoria = st.text_input(
                 "Diretoria responsável",
-                value=diretoria_auto,
+                value=st.session_state.get("diretoria_atual", ""),
                 disabled=True,
-                help="Preenchido automaticamente conforme OM"
+                key="diretoria_auto"
             )
-            diretoria_field_disabled = True
+
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria",
             ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
             index=0,
         )
+
     with col2:
         local = st.text_input("Local / instalação")
         urgencia = st.selectbox("Urgência", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
         data_limite = st.date_input("Data limite (se houver)", value=None)
     motivo = st.text_area("Motivo / justificativa (NAOM)", height=120)
+
     erros = []
     if not om_sigla.strip():
         erros.append("Informe a **OM**.")
-    if not diretoria.strip():
-        if not diretoria_field_disabled:  # Só pede se o campo for manual
+    # Validação: campo correto de diretoria
+    if om_display == "Outra / não listada…":
+        if not st.session_state.get("diretoria_manual", "").strip():
             erros.append("Informe a **diretoria** (selecione uma OM conhecida ou preencha manualmente).")
+        diretoria = st.session_state.get("diretoria_manual", "")
+    else:
+        if not st.session_state.get("diretoria_auto", "").strip():
+            erros.append("Diretoria não encontrada para a OM selecionada.")
+        diretoria = st.session_state.get("diretoria_auto", "")
+
     if not local.strip():
         erros.append("Informe o **local/instalação**.")
     if not motivo.strip():
         erros.append("Descreva o **motivo/justificativa**.")
+
     if erros:
         st.warning("• " + "\n• ".join(erros))
+
     row = {
         "numero": "",  # será preenchido ao salvar
         "data_solicitacao": datetime.now().strftime("%Y-%m-%d %H:%M"),
