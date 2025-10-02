@@ -234,14 +234,4 @@ def page():
         if st.button("📊 Ver Dashboard", use_container_width=True):
             st.info("Redirecionar para dashboard implementado aqui")
 
-    st.divider()
-    st.subheader("📄 Últimas solicitações")
 
-    if not df_existente.empty:
-        c_data = next((c for c in df_existente.columns if "data" in c.lower()), None)
-        if c_data:
-            df_existente[c_data] = pd.to_datetime(df_existente[c_data], errors="coerce")
-            df_existente = df_existente.sort_values(c_data, ascending=False)
-        st.dataframe(df_existente.head(50), use_container_width=True, height=360)
-    else:
-        st.caption("Ainda não há registros.")
