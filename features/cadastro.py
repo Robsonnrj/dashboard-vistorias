@@ -233,9 +233,6 @@ def page():
         if st.button("🧹 Limpar Formulário", use_container_width=True):
             st.session_state.clear()
             st.rerun()
-    with col_btn3:
-        if st.button("📊 Ver Dashboard", use_container_width=True):
-            st.session_state["main_menu"] = "📊 Dashboard"  # Usa a string completa do menu
-            st.rerun()
+  
 
 
