@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import date, datetime
+
 from core.config import TAB_SOLICITACOES, TAB_AUDIT, TAB_VALIDACAO
 from core.data_loader import read_df, overwrite_tab_from_df
 
@@ -17,72 +18,12 @@ def _clean(x) -> str:
     return "" if pd.isna(x) else str(x).strip()
 
 def _date_or(x, default: date) -> date:
-    """Converte para date; se inválido/NaT, retorna 'default'."""
     d = pd.to_datetime(x, errors="coerce")
     return d.date() if pd.notna(d) else default
-
-AUDIT_FIELDS = [
-    "objeto de vistoria", "om apoiada", "diretoria responsável",
-    "classificação de urgência", "situação",
-    "data da solicitação", "data da vistoria",
-    "status - atualização semanal", "observações",
-]
-
-def _now_ts() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def _append_audit(numero: str, changes: dict):
-    """
-    Adiciona 1 linha por campo alterado na aba de auditoria (TAB_AUDIT).
-    Espera: changes = {nome_campo: (valor_antigo, valor_novo), ...}
-    """
-    if not changes:
-        return
-    try:
-        hist = read_df(TAB_AUDIT)
-    except Exception:
-        hist = pd.DataFrame()
-
-    rows = []
-    for campo, (antes, depois) in changes.items():
-        rows.append({
-            "numero": str(numero),
-            "ts": _now_ts(),
-            "campo": campo,
-            "antes": "" if pd.isna(antes) else str(antes),
-            "depois": "" if pd.isna(depois) else str(depois),
-        })
-
-    new_hist = (pd.concat([hist, pd.DataFrame(rows)], ignore_index=True)
-                if not hist.empty else pd.DataFrame(rows))
-
-    # salva de volta (mantendo cabeçalho)
-    overwrite_tab_from_df(TAB_AUDIT, new_hist, keep_header=True)
-
-def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) -> dict:
-    """
-    Compara valores antigos x novos e retorna um dict
-    {nome_campo_humano: (antes, depois)} apenas para os que mudaram.
-    """
-    changes = {}
-    # mapeia nomes humanos -> nomes de coluna reais no DF
-    for human in AUDIT_FIELDS:
-        col_real = cols_map.get(human)
-        if not col_real:
-            continue
-        old = orig_row.get(col_real, "")
-        new = new_row.get(col_real, "")
-        # normaliza para comparar
-        old_s = "" if pd.isna(old) else str(old).strip()
-        new_s = "" if pd.isna(new) else str(new).strip()
-        if old_s != new_s:
-            changes[human] = (old_s, new_s)
-    return changes
 
 def _load_oms_map():
     """Monta opções de OM e mapas display->sigla e sigla->diretoria."""
     options, disp2sig, sig2dir = [], {}, {}
-    # Prioriza a aba de validação; se falhar, tenta a de solicitações
     for tab in (TAB_VALIDACAO, TAB_SOLICITACOES):
         try:
             df = read_df(tab)
@@ -100,7 +41,7 @@ def _load_oms_map():
 
         tmp = pd.DataFrame({"sig": df[c_sig].map(_clean)})
         tmp["nome"] = df[c_nom].map(_clean) if c_nom else ""
-        tmp["dir"]  = df[c_dir].map(_clean)
+        tmp["dir"] = df[c_dir].map(_clean)
         tmp = tmp[tmp["sig"] != ""].drop_duplicates("sig")
 
         for _, r in tmp.iterrows():
@@ -124,6 +65,54 @@ def _load_audit_trail(numero: str) -> pd.DataFrame:
     if hist.empty or "numero" not in hist.columns:
         return pd.DataFrame()
     return hist[hist["numero"].astype(str) == str(numero)].sort_values("ts", ascending=False)
+
+# ---- auditoria de alterações ----
+AUDIT_FIELDS = [
+    "objeto de vistoria", "om apoiada", "diretoria responsável",
+    "classificação de urgência", "situação",
+    "data da solicitação", "data da vistoria",
+    "status - atualização semanal", "observações",
+]
+
+def _now_ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _append_audit(numero: str, changes: dict):
+    """Adiciona 1 linha por campo alterado na aba de auditoria."""
+    if not changes:
+        return
+    try:
+        hist = read_df(TAB_AUDIT)
+    except Exception:
+        hist = pd.DataFrame()
+
+    rows = []
+    for campo, (antes, depois) in changes.items():
+        rows.append({
+            "numero": str(numero),
+            "ts": _now_ts(),
+            "campo": campo,
+            "antes": "" if pd.isna(antes) else str(antes),
+            "depois": "" if pd.isna(depois) else str(depois),
+        })
+
+    new_hist = pd.concat([hist, pd.DataFrame(rows)], ignore_index=True) if not hist.empty else pd.DataFrame(rows)
+    overwrite_tab_from_df(TAB_AUDIT, new_hist, keep_header=True)
+
+def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) -> dict:
+    """Compara valores antigos x novos e retorna {campo_humano: (antes, depois)} só para os que mudaram."""
+    changes = {}
+    for human in AUDIT_FIELDS:
+        col_real = cols_map.get(human)
+        if not col_real:
+            continue
+        old = orig_row.get(col_real, "")
+        new = new_row.get(col_real, "")
+        old_s = "" if pd.isna(old) else str(old).strip()
+        new_s = "" if pd.isna(new) else str(new).strip()
+        if old_s != new_s:
+            changes[human] = (old_s, new_s)
+    return changes
 
 # -----------------------------
 # Página
@@ -156,13 +145,10 @@ def page():
     show_cols = [x for x in [c_obj, c_om, c_dir, c_sit, c_dtS] if x in df.columns]
     show = df[show_cols].copy() if show_cols else df.copy()
     show = show.reset_index().rename(columns={"index": "linha"})
-
     idx = st.selectbox(
         "Registro",
         options=show["linha"].tolist(),
-        format_func=lambda i: " | ".join(
-            [_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]
-        ),
+        format_func=lambda i: " | ".join([_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]),
     )
     if idx is None:
         return
@@ -170,7 +156,8 @@ def page():
     options, disp2sig, sig2dir = _load_oms_map()
     reg = df.loc[idx].copy()
 
-    form_uid = f"r{idx}"  # muda a cada registro selecionado
+    # ----------- formulário com keys únicas por registro -----------
+    form_uid = f"r{idx}"
 
     with st.form(f"frm_status_{form_uid}"):
         objeto = st.text_input(
@@ -178,11 +165,10 @@ def page():
             value=_clean(reg.get(c_obj, "")),
             key=f"obj_{form_uid}",
         )
-    
-        # default do select de OM (pelo valor salvo)
+
         om_default = next((k for k, v in disp2sig.items() if v == _clean(reg.get(c_om, ""))), None)
         default_index = options.index(om_default) if (om_default in options) else None
-    
+
         om_display = st.selectbox(
             "OM APOIADA *",
             options=options,
@@ -191,29 +177,26 @@ def page():
             key=f"om_{form_uid}",
         )
         om_sigla = disp2sig.get(om_display or "", _clean(reg.get(c_om, "")))
-    
+
         diretoria = st.text_input(
             "Diretoria Responsável *",
             value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, ""))),
             key=f"dir_{form_uid}",
         )
-    
+
         urg = st.selectbox(
             "Classificação de Urgência",
             URGENCIAS,
-            index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0])))
-                  if _clean(reg.get(c_urg, "")) in URGENCIAS else 0,
+            index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0]))) if _clean(reg.get(c_urg, "")) in URGENCIAS else 0,
             key=f"urg_{form_uid}",
         )
-    
         sit = st.selectbox(
             "Situação",
             SITUACOES,
-            index=SITUACOES.index(_clean(reg.get(c_sit, SITUACOES[0])))
-                  if _clean(reg.get(c_sit, "")) in SITUACOES else 0,
+            index=SITUACOES.index(_clean(reg.get(c_sit, SITUACOES[0]))) if _clean(reg.get(c_sit, "")) in SITUACOES else 0,
             key=f"sit_{form_uid}",
         )
-    
+
         dt_sol = st.date_input(
             "DATA DA SOLICITAÇÃO",
             value=_date_or(reg.get(c_dtS, ""), date.today()),
@@ -224,7 +207,7 @@ def page():
             value=_date_or(reg.get(c_dtV, ""), date.today()),
             key=f"dtv_{form_uid}",
         )
-    
+
         stw = st.text_input(
             "STATUS - ATUALIZAÇÃO SEMANAL",
             value=_clean(reg.get(c_stw, "")),
@@ -236,14 +219,13 @@ def page():
             height=100,
             key=f"obs_{form_uid}",
         )
-    
+
         salvar = st.form_submit_button("💾 Atualizar registro", type="primary", key=f"save_{form_uid}")
-    
-    
-          if not salvar:
+
+    if not salvar:
         return
 
-    # valida obrigatórios
+    # ----- valida obrigatórios -----
     faltando = []
     if not objeto:    faltando.append("OBJETO DE VISTORIA")
     if not om_sigla:  faltando.append("OM APOIADA")
@@ -253,7 +235,6 @@ def page():
         return
 
     # ----- prepara atualização do DF principal -----
-    # monta um "row novo" só com os campos relevantes
     new_vals = {}
     if c_obj: new_vals[c_obj] = objeto
     if c_om:  new_vals[c_om]  = om_sigla
@@ -265,21 +246,18 @@ def page():
     if c_stw: new_vals[c_stw] = stw
     if c_obs: new_vals[c_obs] = obs
 
-    # localiza a linha pelo "numero" se existir; senão usa o índice selecionado
+    # localizar linha alvo por 'numero' se existir; senão usa o idx selecionado
     cols_all = {c.lower(): c for c in df.columns}
     c_num = cols_all.get("numero")
     if c_num and c_num in df.columns and str(df.at[idx, c_num]).strip():
         numero = str(df.at[idx, c_num]).strip()
         ixs = df.index[df[c_num].astype(str).str.strip() == numero]
-        if len(ixs) > 0:
-            idx_target = ixs[0]
-        else:
-            idx_target = idx  # fallback
+        idx_target = ixs[0] if len(ixs) > 0 else idx
     else:
-        numero = str(df.index.get_loc(idx))  # sem coluna numero; usa posição como id
+        numero = str(df.index.get_loc(idx))
         idx_target = idx
 
-    # coleta changes (diff) para auditoria ANTES de escrever
+    # diff para auditoria
     cols_human_to_real = {
         "objeto de vistoria": c_obj,
         "om apoiada": c_om,
@@ -292,7 +270,6 @@ def page():
         "observações": c_obs,
     }
     orig_row = df.loc[idx_target].copy()
-    # cria uma série com os novos valores para comparar
     new_row = orig_row.copy()
     for k, v in new_vals.items():
         new_row[k] = v
@@ -302,7 +279,7 @@ def page():
     for k, v in new_vals.items():
         df.at[idx_target, k] = v
 
-    # grava DF de volta e registra auditoria
+    # grava e registra auditoria
     try:
         overwrite_tab_from_df(TAB_SOLICITACOES, df, keep_header=True)
         _append_audit(numero, changes)
@@ -310,16 +287,9 @@ def page():
     except Exception as e:
         st.error(f"Falha ao salvar: {e}")
 
-        st.success("Registro atualizado com sucesso.")
-    except Exception as e:
-        st.error(f"Falha ao salvar: {e}")
-
-    # Trilha de Auditoria
+    # --------- Trilha de Auditoria ---------
     st.subheader("📝 Trilha de Auditoria")
-    
-    # evita TypeError com pd.NA usando _clean() antes do "or"
     num = _clean(reg.get("numero", "")) or _clean(reg.get("Numero", ""))
-    
     hist_df = _load_audit_trail(num)
     if hist_df.empty:
         st.info("Sem registros de auditoria para este número.")
