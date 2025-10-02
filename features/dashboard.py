@@ -2,8 +2,10 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import altair as alt  # opcional (usado no stacked opcional)
 from core.data_loader import read_df
 from core.config import TAB_SOLICITACOES
+
 
 def _pick(df: pd.DataFrame, candidates: list[str]) -> str | None:
     """Encontra coluna pela lista de candidatos (match exato ou contém, casefold)."""
@@ -25,6 +27,7 @@ def _pick(df: pd.DataFrame, candidates: list[str]) -> str | None:
             if target in nf(cc):
                 return cc
     return None
+
 
 def page():
     st.header("📊 Dashboard Operacional — Seção de Vistorias")
@@ -48,14 +51,17 @@ def page():
     c_dt_s = _pick(df, ["DATA DA SOLICITAÇÃO", "Data", "DATA DA SOLICITAÇÃO_2"])
     c_dt_v = _pick(df, ["DATA DA VISTORIA"])
 
-    # Normalizações
+    # Normalizações de data (robustas)
     for c in [c_dt_s, c_dt_v]:
         if c and c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
+            try:
+                # remove timezone, se houver
+                df[c] = df[c].dt.tz_localize(None)
+            except Exception:
+                pass
 
-    st.caption(
-        "Base: **{0}** • Registros: **{1}**".format(TAB_SOLICITACOES, len(df))
-    )
+    st.caption("Base: **{0}** • Registros: **{1}**".format(TAB_SOLICITACOES, len(df)))
 
     # Filtros simples
     colF1, colF2, colF3 = st.columns(3)
@@ -85,23 +91,74 @@ def page():
     st.divider()
     cols = st.columns(2)
 
-    # Gráficos
+    # Gráficos de barras e pizza
     if c_dir:
         with cols[0]:
             tmp = dff.groupby(c_dir, as_index=False).size().sort_values("size", ascending=False)
-            st.plotly_chart(px.bar(tmp, x=c_dir, y="size", title="Vistorias por Diretoria"), use_container_width=True)
+            st.plotly_chart(px.bar(tmp, x=c_dir, y="size", title="Vistorias por Diretoria",
+                                   labels={"size": "Vistorias"}), use_container_width=True)
 
     if c_sit:
         with cols[1]:
             tmp = dff.groupby(c_sit, as_index=False).size()
-            st.plotly_chart(px.pie(tmp, names=c_sit, values="size", hole=.45, title="Distribuição por Situação"), use_container_width=True)
+            st.plotly_chart(px.pie(tmp, names=c_sit, values="size", hole=.45,
+                                   title="Distribuição por Situação",
+                                   labels={"size": "Vistorias"}), use_container_width=True)
 
+    # Evolução Mensal (corrigido/robusto)
     if c_dt_s:
-        tmp = dff.copy()
-        tmp = tmp.dropna(subset=[c_dt_s])
-        if not tmp.empty:
-            tmp = (tmp.groupby(pd.Grouper(key=c_dt_s, freq="MS")).size().reset_index(name="Vistorias"))
-            st.plotly_chart(px.line(tmp, x=c_dt_s, y="Vistorias", markers=True, title="Evolução Mensal"), use_container_width=True)
+        base = dff.dropna(subset=[c_dt_s]).copy()
+        if not base.empty:
+            # mês normalizado (primeiro dia do mês)
+            base["_MES"] = base[c_dt_s].dt.to_period("M").dt.to_timestamp()
+
+            evol = (base.groupby("_MES", as_index=False)
+                        .size()
+                        .rename(columns={"_MES": "MES", "size": "Vistorias"})
+                        .sort_values("MES"))
+
+            # sequência contínua de meses entre min e max
+            if not evol.empty:
+                idx = pd.period_range(evol["MES"].min(), evol["MES"].max(), freq="M").to_timestamp()
+                evol = (evol.set_index("MES")
+                             .reindex(idx, fill_value=0)
+                             .rename_axis("MES")
+                             .reset_index())
+
+            st.plotly_chart(
+                px.line(evol, x="MES", y="Vistorias", markers=True,
+                        title="Evolução Mensal").update_layout(xaxis_title="DATA DA SOLICITAÇÃO",
+                                                              yaxis_title="Vistorias"),
+                use_container_width=True,
+            )
+
+            # ----- (opcional) evolução mensal por Situação empilhada -----
+            if c_sit:
+                por_sit = (base.assign(SITUACAO=base[c_sit].astype(str).str.strip())
+                               .groupby(["_MES", "SITUACAO"], as_index=False)
+                               .size()
+                               .rename(columns={"_MES": "MES", "size": "Vistorias"}))
+
+                if not por_sit.empty:
+                    meses = pd.period_range(por_sit["MES"].min(), por_sit["MES"].max(), freq="M").to_timestamp()
+                    todas_sit = sorted(por_sit["SITUACAO"].unique().tolist())
+                    idx = pd.MultiIndex.from_product([meses, todas_sit], names=["MES", "SITUACAO"])
+                    por_sit = (por_sit.set_index(["MES", "SITUACAO"])
+                                     .reindex(idx, fill_value=0)
+                                     .reset_index())
+
+                    # usando altair para área empilhada (poderia ser plotly também)
+                    chart_sit = (
+                        alt.Chart(por_sit)
+                           .mark_area()
+                           .encode(
+                               x=alt.X("MES:T", title="DATA DA SOLICITAÇÃO", axis=alt.Axis(format="%b %Y")),
+                               y=alt.Y("Vistorias:Q", stack="zero", title="Vistorias"),
+                               color=alt.Color("SITUACAO:N", title="Situação")
+                           )
+                           .properties(title="Evolução Mensal por Situação", height=260)
+                    )
+                    st.altair_chart(chart_sit, use_container_width=True)
 
     st.subheader("📄 Registros (completos)")
     # Mostra a tabela inteira, sem truncar para 50
