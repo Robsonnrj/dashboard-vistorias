@@ -99,12 +99,24 @@ def page():
 
     with st.form("frm_status"):
         objeto = st.text_input("OBJETO DE VISTORIA *", value=_clean(reg.get(c_obj, "")))
-        om_default = next((k for k, v in disp2sig.items() if v == _clean(reg.get(c_om, ""))), None)
-        om_display = st.selectbox("OM APOIADA *", options, index=None, placeholder="Selecione…", key="om_disp",
-                                  index=options.index(om_default) if om_default in options else None)
-        om_sigla = disp2sig.get(om_display or "", _clean(reg.get(c_om, "")))
-        diretoria = st.text_input("Diretoria Responsável *", value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, ""))))
 
+        # calcula o display padrão a partir da sigla salva no DF
+        om_default = next((k for k, v in disp2sig.items() if v == _clean(reg.get(c_om, ""))), None)
+        default_index = options.index(om_default) if (om_default in options) else None
+
+        om_display = st.selectbox(
+            "OM APOIADA *",
+            options=options,
+            index=default_index,           # <-- apenas UMA vez
+            placeholder="Selecione…",
+            key="om_disp",
+        )
+
+        om_sigla = disp2sig.get(om_display or "", _clean(reg.get(c_om, "")))
+        diretoria = st.text_input(
+            "Diretoria Responsável *",
+            value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, "")))
+        )
         urg = st.selectbox("Classificação de Urgência", URGENCIAS,
                            index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0]))) if _clean(reg.get(c_urg, "")) in URGENCIAS else 0)
         sit = st.selectbox("Situação", SITUACOES,
@@ -152,3 +164,19 @@ def page():
         st.info("Sem registros de auditoria para este número.")
     else:
         st.dataframe(hist_df, use_container_width=True, height=300)
+
+
+def _date_or_today(x):
+            d = pd.to_datetime(x, errors="coerce")
+            return d.date() if pd.notna(d) else date.today()
+
+        dt_sol = st.date_input(
+            "DATA DA SOLICITAÇÃO",
+            value=_date_or_today(reg.get(c_dtS, "")) if c_dtS else date.today()
+        )
+
+        d_vis = pd.to_datetime(reg.get(c_dtV, ""), errors="coerce")
+        dt_vis = st.date_input(
+            "DATA DA VISTORIA",
+            value=(d_vis.date() if pd.notna(d_vis) else date.today()) if c_dtV else date.today()
+        )
