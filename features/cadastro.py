@@ -6,134 +6,129 @@ import pandas as pd
 
 from core.data_loader import append_row, read_df
 
-# =========================================================
-# Helpers
-# =========================================================
-def _norm(s: str) -> str:
-    return str(s).strip().lower()
+# ===============================
+# Helpers para normalização e busca de colunas
+# ===============================
+def _normalize(text: str) -> str:
+    return str(text).strip().lower()
 
-def _find_col(df: pd.DataFrame, *cands: str) -> str:
-    """Procura coluna por nome (exato ou contém), ignorando maiúsculas/acentos simples."""
-    cols = {_norm(c): c for c in df.columns}
-    for c in cands:
-        k = _norm(c)
-        if k in cols:
-            return cols[k]
-    for want in cands:
-        w = _norm(want)
-        for k, orig in cols.items():
-            if w in k:
-                return orig
-    raise KeyError(f"Não achei colunas {cands} em {list(df.columns)}")
+def _find_column(df: pd.DataFrame, *column_names: str) -> str:
+    """
+    Busca uma coluna no dataframe pelo nome exato ou parcial (case insensitive).
+    Retorna o nome exato da coluna encontrada.
+    """
+    columns_map = {_normalize(c): c for c in df.columns}
+    for name in column_names:
+        norm_name = _normalize(name)
+        if norm_name in columns_map:
+            return columns_map[norm_name]
+    # busca parcial
+    for name in column_names:
+        norm_name = _normalize(name)
+        for norm_col, orig_col in columns_map.items():
+            if norm_name in norm_col:
+                return orig_col
+    raise KeyError(f"Coluna(s) '{column_names}' não encontradas em {df.columns.tolist()}")
 
-# =========================================================
-# Leitura da aba de validação (robusta ao cabeçalho)
-# =========================================================
+# ===============================
+# Carrega OMs e Diretorias da aba de validação
+# ===============================
+@st.cache_data(ttl=600)
 def _load_oms_validadas() -> pd.DataFrame:
-    """
-    Lê a aba 'Validacao_de_Dados' e retorna colunas padronizadas:
-    om_sigla, om_nome, diretoria.
-    """
-    # 1) lê SEM header=... (alguns conectores não aceitam)
-    df = read_df("Validacao_de_Dados")
+    df_raw = read_df("Validacao_de_Dados")
 
-    # 2) Se a primeira linha parece ser o cabeçalho, promove-a a header
-    def _maybe_promote_header(df0: pd.DataFrame) -> pd.DataFrame:
-        if df0.empty:
-            return df0
-        cols_lower = [str(c).strip().lower() for c in df0.columns]
-        row0_lower = [str(x).strip().lower() for x in df0.iloc[0].tolist()]
-        has_expected_in_cols = any(
-            ("diretoria" in c) or ("organização" in c) or ("organizacao" in c) or (c == "om")
-            for c in cols_lower
-        )
-        has_expected_in_row0 = any(
-            ("diretoria" in x) or ("organização" in x) or ("organizacao" in x) or (x == "om")
-            for x in row0_lower
-        )
-        if not has_expected_in_cols and has_expected_in_row0:
-            df1 = df0.copy()
-            df1.columns = df1.iloc[0]
-            df1 = df1.iloc[1:].reset_index(drop=True)
-            return df1
-        return df0
+    def _try_promote_header(df: pd.DataFrame) -> pd.DataFrame:
+        # Promove primeira linha para header se necessário (detecção básica)
+        if df.empty:
+            return df
+        first_row = df.iloc[0].astype(str).str.lower()
+        cols_lower = [str(c).lower() for c in df.columns]
+        has_expected = lambda x: any(k in x for k in ("om", "sigla", "diretoria", "organizacao"))
+        if (not any(has_expected(col) for col in cols_lower)) and any(has_expected(x) for x in first_row):
+            df_new = df.copy()
+            df_new.columns = df_new.iloc[0]
+            df_new = df_new.drop(df_new.index[0]).reset_index(drop=True)
+            return df_new
+        return df
 
-    df = _maybe_promote_header(df)
+    df = _try_promote_header(df_raw)
 
-    # 3) Detecta colunas
-    col_sigla = _find_col(df, "om", "sigla")
-    col_nome  = _find_col(df, "organização militar", "organizacao militar", "om nome", "nome")
-    col_dir   = _find_col(df, "diretoria responsável", "diretoria responsavel", "diretoria")
+    # Detecta colunas principais
+    try:
+        col_sigla = _find_column(df, "om", "sigla")
+        col_nome = _find_column(df, "organização militar", "organizacao militar", "om nome", "nome")
+        col_diretoria = _find_column(df, "diretoria responsável", "diretoria")
+    except KeyError:
+        st.error("Erro ao localizar colunas OM, Nome ou Diretoria na aba de validação.")
+        return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
 
-    out = df.rename(columns={
-        col_sigla: "om_sigla",
-        col_nome : "om_nome",
-        col_dir  : "diretoria",
-    })[["om_sigla", "om_nome", "diretoria"]].copy()
-
-    # 4) Limpeza
-    for c in ["om_sigla", "om_nome", "diretoria"]:
+    # Extrai e limpa dados das colunas
+    out = df[[col_sigla, col_nome, col_diretoria]].copy()
+    out.columns = ["om_sigla", "om_nome", "diretoria"]
+    for c in out.columns:
         out[c] = out[c].astype(str).str.strip()
-
     out = out[(out["om_sigla"] != "") & (out["diretoria"] != "")]
-    out = out.drop_duplicates(subset=["om_sigla", "diretoria"])
+    out = out.drop_duplicates()
+
     return out
 
+# ===============================
+# Constrói opções para select e dicionários auxiliares
+# ===============================
 def _build_om_options(oms_df: pd.DataFrame):
-    """
-    Retorna (options_display, disp_to_sigla, sigla_to_dir, disp_to_dir)
-    - disp_to_dir permite mapear DIRETAMENTE pela string exibida no select.
-    """
-    options_display, disp_to_sigla, sigla_to_dir, disp_to_dir = [], {}, {}, {}
+    options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria = [], {}, {}, {}
+
     for _, r in oms_df.iterrows():
-        sig  = str(r["om_sigla"]).strip()
-        nom  = str(r["om_nome"]).strip()
-        dire = str(r["diretoria"]).strip()
-        display = f"{sig} — {nom}" if nom else sig
+        sigla = r["om_sigla"]
+        nome = r["om_nome"]
+        diretoria = r["diretoria"]
+        display = f"{sigla} — {nome}" if nome else sigla
         options_display.append(display)
-        disp_to_sigla[display] = sig
-        sigla_to_dir[sig] = dire
-        disp_to_dir[display] = dire
+        disp_to_sigla[display] = sigla
+        sigla_to_diretoria[sigla] = diretoria
+        disp_to_diretoria[display] = diretoria
+
     options_display.append("Outra / não listada…")
     disp_to_sigla["Outra / não listada…"] = ""
-    disp_to_dir["Outra / não listada…"] = ""
-    return options_display, disp_to_sigla, sigla_to_dir, disp_to_dir
+    disp_to_diretoria["Outra / não listada…"] = ""
 
-# =========================================================
-# UI
-# =========================================================
+    return options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria
+
+# ===============================
+# Interface principal do formulário
+# ===============================
 def _input_row():
     st.subheader("📥 Nova solicitação de vistoria")
     oms_df = _load_oms_validadas()
     options, disp2sig, sig2dir, disp2dir = _build_om_options(oms_df)
-    st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
 
-    st.session_state.setdefault("diretoria_auto", "")
+    st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        # OM (display)
         om_display = st.selectbox(
             "OM solicitante (sigla) *",
             options=options,
-            index=None,
-            placeholder="Selecione ou digite…",
             key="om_choice",
+            placeholder="Selecione ou digite…"
         )
-        om_sigla = disp2sig.get(om_display or "", "")
 
-        # Diretoria
+        om_sigla = disp2sig.get(om_display, "")
+
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
             st.session_state["diretoria_auto"] = ""
         else:
-            # 1º tenta via display (confiável); se vazio, cai para sigla
-            default_dir = disp2dir.get(om_display or "", "") or sig2dir.get(om_sigla or "", "")
+            default_dir = disp2dir.get(om_display, "") or sig2dir.get(om_sigla, "")
             st.session_state["diretoria_auto"] = default_dir
-            st.text_input("Diretoria responsável *", key="diretoria_auto", disabled=True)
-            diretoria = st.session_state["diretoria_auto"]
+            diretoria = st.text_input(
+                "Diretoria responsável *",
+                value=st.session_state.get("diretoria_auto", ""),
+                disabled=True,
+                key="diretoria_auto"
+            )
 
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria *",
@@ -143,12 +138,15 @@ def _input_row():
 
     with col2:
         local = st.text_input("Local / instalação *")
-        urgencia = st.selectbox("Urgência *", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
+        urgencia = st.selectbox(
+            "Urgência *",
+            ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"],
+            index=0
+        )
         data_limite = st.date_input("Data limite (opcional)", value=None)
 
     motivo = st.text_area("Motivo / justificativa (NAOM) *", height=120)
 
-    # Validação
     erros = []
     if not (om_sigla or "").strip():
         erros.append("Informe a **OM**.")
@@ -178,8 +176,12 @@ def _input_row():
         "motivo": (motivo or "").strip(),
         "status_atual": "SOLICITADA",
     }
+
     return row, (len(erros) == 0)
 
+# ===============================
+# Página principal
+# ===============================
 def page():
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
     tabs_map = st.session_state.get("tabs_map", {})
