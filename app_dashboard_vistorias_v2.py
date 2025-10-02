@@ -15,7 +15,8 @@ with st.sidebar:
         clear_caches()
         st.toast("Cache limpo. Recarregando…")
         st.rerun()  # <- troquei experimental_rerun() por rerun()
-   
+        
+MENU = option_menu( 
     None,
     ["📊 Dashboard", "📝 Cadastro", "🧾 Status/Auditoria"],
     icons=["bar-chart", "file-plus", "list-check"],
