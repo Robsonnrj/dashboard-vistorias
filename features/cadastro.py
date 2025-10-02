@@ -82,36 +82,40 @@ def _input_row():
     col1, col2 = st.columns(2)
 
     with col1:
+        # 1) Select da OM
         om_display = st.selectbox(
             "OM solicitante (sigla) *",
             options=options,
             index=None,
             placeholder="Selecione ou digite…",
             key="om_choice",
-            on_change=_on_om_change,
-            args=(disp2sig, sig2dir),
         )
         om_sigla = disp2sig.get(om_display or "", "")
-
-        # diretoria: automática para OMs conhecidas; manual se "Outra…"
+    
+        # 2) Diretoria: automática se OM conhecida; manual se "Outra…"
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
+            # zera o estado automático caso o usuário mude para "Outra…"
+            st.session_state["diretoria_auto"] = ""
         else:
-            # garante o valor inicial mesmo antes do on_change
+            # <<< AQUI ESTÁ O PULO DO GATO >>>
+            # Define SEMPRE o valor correto da diretoria com base na sigla da OM selecionada
             default_dir = sig2dir.get(om_sigla, "")
-            if "diretoria_auto" not in st.session_state:
-                st.session_state["diretoria_auto"] = default_dir
-            elif default_dir and st.session_state.get("om_choice") == om_display and not st.session_state["diretoria_auto"]:
-                st.session_state["diretoria_auto"] = default_dir
-        
+            st.session_state["diretoria_auto"] = default_dir
+    
             st.text_input(
                 "Diretoria responsável *",
-                key="diretoria_auto",      # <- usa a MESMA chave do on_change
+                key="diretoria_auto",   # mesma chave usada acima
                 disabled=True
             )
             diretoria = st.session_state["diretoria_auto"]
-
+    
+        tipo_vistoria = st.selectbox(
+            "Tipo de vistoria *",
+            ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
+            index=0,
+        )
     with col2:
         local = st.text_input("Local / instalação *")
         urgencia = st.selectbox("Urgência *", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
