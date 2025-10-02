@@ -207,7 +207,19 @@ def page():
             st.rerun()
         except Exception as e:
             st.error(f"Falha ao salvar: {e}")
-
+# Botões de ação na parte inferior
+    col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+    with col_btn1:
+        st.button("💾 Salvar Solicitação", type="primary", disabled=not ok, use_container_width=True)
+    with col_btn2:
+        if st.button("🧹 Limpar Formulário", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+    with col_btn3:
+        if st.button("📊 Ver Dashboard", use_container_width=True):
+            # Se estiver usando multipágina: st.switch_page("pages/dashboard.py")
+            st.info("Redirecionar para dashboard implementado aqui")
+            
     st.divider()
     st.subheader("📄 Últimas solicitações")
     if not df_existente.empty:
