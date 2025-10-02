@@ -10,11 +10,21 @@ from core.data_loader import read_df, overwrite_tab_from_df
 URGENCIAS = ["Não Prioridade", "Prioridade", "Urgente"]
 SITUACOES = ["Não Atendida", "Em andamento", "Finalizada"]
 
+# -----------------------------
+# Helpers
+# -----------------------------
 def _clean(x) -> str:
     return "" if pd.isna(x) else str(x).strip()
 
+def _date_or(x, default: date) -> date:
+    """Converte para date; se inválido/NaT, retorna 'default'."""
+    d = pd.to_datetime(x, errors="coerce")
+    return d.date() if pd.notna(d) else default
+
 def _load_oms_map():
+    """Monta opções de OM e mapas display->sigla e sigla->diretoria."""
     options, disp2sig, sig2dir = [], {}, {}
+    # Prioriza a aba de validação; se falhar, tenta a de solicitações
     for tab in (TAB_VALIDACAO, TAB_SOLICITACOES):
         try:
             df = read_df(tab)
@@ -48,15 +58,18 @@ def _load_oms_map():
     return options, disp2sig, sig2dir
 
 def _load_audit_trail(numero: str) -> pd.DataFrame:
+    """Filtra trilha de auditoria pelo número do registro."""
     try:
         hist = read_df(TAB_AUDIT)
     except Exception:
         return pd.DataFrame()
     if hist.empty or "numero" not in hist.columns:
         return pd.DataFrame()
-
     return hist[hist["numero"].astype(str) == str(numero)].sort_values("ts", ascending=False)
 
+# -----------------------------
+# Página
+# -----------------------------
 def page():
     st.header("🔁 VIS-003 — Controle de Status e Auditoria")
 
@@ -85,12 +98,14 @@ def page():
     show_cols = [x for x in [c_obj, c_om, c_dir, c_sit, c_dtS] if x in df.columns]
     show = df[show_cols].copy() if show_cols else df.copy()
     show = show.reset_index().rename(columns={"index": "linha"})
+
     idx = st.selectbox(
         "Registro",
         options=show["linha"].tolist(),
-        format_func=lambda i: " | ".join([_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]),
+        format_func=lambda i: " | ".join(
+            [_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]
+        ),
     )
-
     if idx is None:
         return
 
@@ -100,30 +115,39 @@ def page():
     with st.form("frm_status"):
         objeto = st.text_input("OBJETO DE VISTORIA *", value=_clean(reg.get(c_obj, "")))
 
-        # calcula o display padrão a partir da sigla salva no DF
+        # default do select de OM (pelo valor salvo)
         om_default = next((k for k, v in disp2sig.items() if v == _clean(reg.get(c_om, ""))), None)
         default_index = options.index(om_default) if (om_default in options) else None
 
         om_display = st.selectbox(
             "OM APOIADA *",
             options=options,
-            index=default_index,           # <-- apenas UMA vez
+            index=default_index,            # apenas uma vez
             placeholder="Selecione…",
             key="om_disp",
         )
-
         om_sigla = disp2sig.get(om_display or "", _clean(reg.get(c_om, "")))
+
         diretoria = st.text_input(
             "Diretoria Responsável *",
             value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, "")))
         )
-        urg = st.selectbox("Classificação de Urgência", URGENCIAS,
-                           index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0]))) if _clean(reg.get(c_urg, "")) in URGENCIAS else 0)
-        sit = st.selectbox("Situação", SITUACOES,
-                           index=SITUACOES.index(_clean(reg.get(c_sit, SITUACOES[0]))) if _clean(reg.get(c_sit, "")) in SITUACOES else 0)
 
-        dt_sol = st.date_input("DATA DA SOLICITAÇÃO", value=pd.to_datetime(reg.get(c_dtS, ""), errors="coerce").date() if c_dtS else date.today())
-        dt_vis = st.date_input("DATA DA VISTORIA", value=pd.to_datetime(reg.get(c_dtV, ""), errors="coerce").date() if c_dtV else None)
+        urg = st.selectbox(
+            "Classificação de Urgência",
+            URGENCIAS,
+            index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0])))
+                  if _clean(reg.get(c_urg, "")) in URGENCIAS else 0
+        )
+        sit = st.selectbox(
+            "Situação",
+            SITUACOES,
+            index=SITUACOES.index(_clean(reg.get(c_sit, SITUACOES[0])))
+                  if _clean(reg.get(c_sit, "")) in SITUACOES else 0
+        )
+
+        dt_sol = st.date_input("DATA DA SOLICITAÇÃO", value=_date_or(reg.get(c_dtS, ""), date.today()))
+        dt_vis = st.date_input("DATA DA VISTORIA", value=_date_or(reg.get(c_dtV, ""), date.today()))
 
         stw = st.text_input("STATUS - ATUALIZAÇÃO SEMANAL", value=_clean(reg.get(c_stw, "")))
         obs = st.text_area("OBSERVAÇÕES", value=_clean(reg.get(c_obs, "")), height=100)
@@ -157,26 +181,10 @@ def page():
     except Exception as e:
         st.error(f"Falha ao salvar: {e}")
 
-    # Exibe trilha de auditoria
+    # Trilha de auditoria
     st.subheader("📝 Trilha de Auditoria")
     hist_df = _load_audit_trail((reg.get("numero") or reg.get("Numero") or ""))
     if hist_df.empty:
         st.info("Sem registros de auditoria para este número.")
     else:
         st.dataframe(hist_df, use_container_width=True, height=300)
-
-
-def _date_or_today(x):
-            d = pd.to_datetime(x, errors="coerce")
-            return d.date() if pd.notna(d) else date.today()
-
-        dt_sol = st.date_input(
-            "DATA DA SOLICITAÇÃO",
-            value=_date_or_today(reg.get(c_dtS, "")) if c_dtS else date.today()
-        )
-
-        d_vis = pd.to_datetime(reg.get(c_dtV, ""), errors="coerce")
-        dt_vis = st.date_input(
-            "DATA DA VISTORIA",
-            value=(d_vis.date() if pd.notna(d_vis) else date.today()) if c_dtV else date.today()
-        )
