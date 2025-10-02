@@ -15,6 +15,11 @@ with st.sidebar:
         clear_caches()
         st.toast("Cache limpo. Recarregando…")
         st.rerun()  # <- troquei experimental_rerun() por rerun()
+    if st.session_state.get("current_page") == "dashboard":
+        from features import dashboard
+        dashboard.page()
+    else:
+        # Cadastro ou menu padrão
 
 MENU = option_menu(
     None,
