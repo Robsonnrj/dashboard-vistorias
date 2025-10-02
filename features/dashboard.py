@@ -50,9 +50,10 @@ def page():
     c_sit  = _pick(df, ["Situação", "Status", "STATUS - ATUALIZAÇÃO SEMANAL"])
     c_dt_s = _pick(df, ["DATA DA SOLICITAÇÃO", "Data", "DATA DA SOLICITAÇÃO_2"])
     c_dt_v = _pick(df, ["DATA DA VISTORIA"])
+    c_dt_conc = _pick(df, ["DATA DE CONCLUSÃO", "DATA FINAL", "CONCLUÍDA EM"])
 
     # Normalizações de data (robustas)
-    for c in [c_dt_s, c_dt_v]:
+    for c in [c_dt_s, c_dt_v, c_dt_conc]:
         if c and c in df.columns:
             df[c] = pd.to_datetime(df[c], errors="coerce")
             try:
@@ -88,6 +89,17 @@ def page():
     with colK3: st.metric("Em andamento", f"{andam:,}".replace(",", "."))
     with colK4: st.metric("Finalizadas", f"{fini:,}".replace(",", "."))
 
+    # Calcular dias de conclusão se possível
+    if c_dt_s and c_dt_conc:
+        dff["DIAS_CONCLUSAO"] = (dff[c_dt_conc] - dff[c_dt_s]).dt.days
+        dias_conc = dff[dff[c_sit].astype(str).str.contains("conclu", case=False, na=False)]["DIAS_CONCLUSAO"]
+        with st.expander("Tempo Médio de Conclusão (dias)"):
+            if not dias_conc.empty:
+                st.metric("Dias médios", f"{dias_conc.mean():.2f}")
+                st.write(dias_conc.describe())
+            else:
+                st.write("Sem dados suficientes para calcular.")
+
     st.divider()
     cols = st.columns(2)
 
@@ -106,28 +118,25 @@ def page():
                                    labels={"size": "Vistorias"}), use_container_width=True)
 
     
-    # Evolução Mensal (forçando eixo categórico YYYY-MM)
+    # Evolução Mensal por Data da Solicitacao
     if c_dt_s:
         base = dff.dropna(subset=[c_dt_s]).copy()
         if not base.empty:
-            # mês como Period (não datetime) e string para eixo categórico
             base["_MES"] = base[c_dt_s].dt.to_period("M")
             month_order = sorted(base["_MES"].unique().tolist())
-            base["_MES_STR"] = base["_MES"].astype(str)        # ex.: '2025-10'
-    
-            # total por mês (com todos os meses no intervalo)
+            base["_MES_STR"] = base["_MES"].astype(str)
+
             evol = (
                 base.groupby("_MES_STR", as_index=False)
                     .size()
                     .rename(columns={"_MES_STR": "MÊS", "size": "Vistorias"})
             )
-            # garante sequência contínua de meses
             full_months = [str(m) for m in month_order]
             evol = (evol.set_index("MÊS")
                         .reindex(full_months, fill_value=0)
                         .rename_axis("MÊS")
                         .reset_index())
-    
+
             fig = px.line(evol, x="MÊS", y="Vistorias", markers=True, title="Evolução Mensal")
             fig.update_layout(
                 xaxis_title="DATA DA SOLICITAÇÃO",
@@ -135,8 +144,8 @@ def page():
                 xaxis=dict(type="category", categoryorder="array", categoryarray=full_months),
             )
             st.plotly_chart(fig, use_container_width=True)
-    
-            # --- (opcional) Evolução Mensal por Situação (empilhado) ---
+
+            # Evolução Mensal por Situação (empilhado) opcional
             if c_sit:
                 por_sit = (
                     base.assign(Sit=base[c_sit].astype(str).str.strip())
@@ -144,15 +153,14 @@ def page():
                         .size()
                         .rename(columns={"_MES_STR": "MÊS", "size": "Vistorias"})
                 )
-    
+
                 if not por_sit.empty:
-                    # completa grade MÊS x Situação com zeros
                     todas_sit = sorted(por_sit["Sit"].unique().tolist())
                     full_idx = pd.MultiIndex.from_product([full_months, todas_sit], names=["MÊS", "Sit"])
                     por_sit = (por_sit.set_index(["MÊS", "Sit"])
                                      .reindex(full_idx, fill_value=0)
                                      .reset_index())
-    
+
                     fig2 = px.area(
                         por_sit, x="MÊS", y="Vistorias", color="Sit",
                         title="Evolução Mensal por Situação"
@@ -163,3 +171,32 @@ def page():
                         xaxis=dict(type="category", categoryorder="array", categoryarray=full_months),
                     )
                     st.plotly_chart(fig2, use_container_width=True)
+
+    # Evolução mensal das vistorias concluídas por data de conclusão
+    if c_dt_conc and c_sit:
+        concluidas = dff[dff[c_sit].astype(str).str.contains("conclu", case=False, na=False)].copy()
+        concluidas = concluidas.dropna(subset=[c_dt_conc])
+        if not concluidas.empty:
+            concluidas["_MES_CONC"] = concluidas[c_dt_conc].dt.to_period("M")
+            month_order_conc = sorted(concluidas["_MES_CONC"].unique().tolist())
+            concluidas["_MES_CONC_STR"] = concluidas["_MES_CONC"].astype(str)
+
+            evol_conc = (
+                concluidas.groupby("_MES_CONC_STR", as_index=False).size()
+                .rename(columns={"_MES_CONC_STR": "MÊS_CONC", "size": "Concluídas"})
+            )
+            full_months_conc = [str(m) for m in month_order_conc]
+            evol_conc = (
+                evol_conc.set_index("MÊS_CONC")
+                .reindex(full_months_conc, fill_value=0)
+                .rename_axis("MÊS_CONC")
+                .reset_index()
+            )
+
+            fig_conc = px.line(evol_conc, x="MÊS_CONC", y="Concluídas", markers=True, title="Vistorias Concluídas por Mês")
+            fig_conc.update_layout(
+                xaxis_title="MÊS DE CONCLUSÃO",
+                yaxis_title="Vistorias Concluídas",
+                xaxis=dict(type="category", categoryorder="array", categoryarray=full_months_conc),
+            )
+            st.plotly_chart(fig_conc, use_container_width=True)
