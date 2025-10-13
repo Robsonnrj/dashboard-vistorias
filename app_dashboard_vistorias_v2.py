@@ -125,7 +125,7 @@ def main():
     with st.sidebar:
         st.header("Filtros")
     
-        # período
+        # Período
         if COL["dt_solic"] and COL["dt_solic"] in df.columns:
             min_d = pd.to_datetime(df[COL["dt_solic"]]).min()
             max_d = pd.to_datetime(df[COL["dt_solic"]]).max()
@@ -165,6 +165,12 @@ def main():
     dff = df[mask].copy()
 
     # =========================================================
+    # Derivados (prazo) — criados ANTES dos KPIs e do DOCX
+    # =========================================================
+    if (COL["dt_solic"] and COL["dt_solic"] in dff.columns) and (COL["dt_conc"] and COL["dt_conc"] in dff.columns):
+        dff["Tempo Execução (dias)"] = (dff[COL["dt_conc"]] - dff[COL["dt_solic"]]).dt.days
+
+    # =========================================================
     # Indicadores principais (KPIs)
     # =========================================================
     st.subheader("Indicadores de Desempenho")
@@ -181,14 +187,13 @@ def main():
         col2.metric("% Emergenciais", "—")
     
     if COL["orcamento"] and COL["orcamento"] in dff.columns:
-        total_r$ = dff[COL["orcamento"]].sum()
-        col3.metric("Orçamento Total", f"R$ {total_r$:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
+        total_rs = dff[COL["orcamento"]].sum()
+        col3.metric("Orçamento Total", f"R$ {total_rs:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
     else:
         col3.metric("Orçamento Total", "—")
     
-    if (COL["dt_solic"] and COL["dt_solic"] in dff.columns) and (COL["dt_conc"] and COL["dt_conc"] in dff.columns):
-        prazo = (dff[COL["dt_conc"]] - dff[COL["dt_solic"]]).dt.days
-        col4.metric("Prazo Médio de Execução", f"{prazo.mean():.1f} dias" if len(prazo.dropna()) else "—")
+    if "Tempo Execução (dias)" in dff.columns and dff["Tempo Execução (dias)"].notna().any():
+        col4.metric("Prazo Médio de Execução", f"{dff['Tempo Execução (dias)'].mean():.1f} dias")
     else:
         col4.metric("Prazo Médio de Execução", "—")
 
@@ -197,7 +202,7 @@ def main():
     # =========================================================
     st.subheader("Visualizações Analíticas")
 
-# 1. Série temporal
+    # 1. Série temporal
     if COL["dt_solic"] and COL["dt_solic"] in dff.columns:
         df_mes = (dff.groupby(dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp())
                      .size().reset_index(name="qtd"))
@@ -222,10 +227,12 @@ def main():
         fig4 = px.bar(by_class, x="Classificação", y=COL["orcamento"], text_auto=".2s", title="Orçamento por Classificação")
         st.plotly_chart(fig4, use_container_width=True)
 
+    # Aviso de colunas ausentes
     missing = [k for k,v in COL.items() if k in ["om","status","especialidade","dt_solic"] and not v]
     if missing:
         st.warning("Colunas não encontradas na base: " + ", ".join(missing) +
                    ". O dashboard continua funcionando, mas alguns filtros/gráficos serão ocultados.")
+
     # =========================================================
     # Tabela detalhada
     # =========================================================
@@ -246,9 +253,11 @@ def main():
         doc.add_heading("Indicadores Principais", level=2)
         doc.add_paragraph(f"Total de Vistorias: {len(dff)}")
         doc.add_paragraph(f"% Emergenciais: {100 * dff['Classificação'].eq('Emergencial').mean():.1f}%")
-        if COL["orcamento"]:
-            doc.add_paragraph(f"Orçamento Total: R$ {dff[COL['orcamento']].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-        if "Tempo Execução (dias)" in dff:
+        if COL["orcamento"] and COL["orcamento"] in dff.columns:
+            doc.add_paragraph(
+                f"Orçamento Total: R$ {dff[COL['orcamento']].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            )
+        if "Tempo Execução (dias)" in dff.columns:
             doc.add_paragraph(f"Prazo Médio de Execução: {dff['Tempo Execução (dias)'].mean():.1f} dias")
 
         doc.add_heading("Tabela de Vistorias", level=2)
