@@ -85,56 +85,83 @@ def main():
     # Identificação automática de colunas
     # -----------------------------------------------------
     COL = {
-        "om": _pick(df, ["OM", "OM beneficiada", "OM apoiada"]),
-        "diretoria": _pick(df, ["Diretoria", "Dir responsável"]),
-        "especialidade": _pick(df, ["Especialidade", "Engenharia"]),
-        "prioridade": _pick(df, ["Prioridade", "Classificação"]),
-        "status": _pick(df, ["Status", "Situação"]),
-        "dt_solic": _pick(df, ["Data da solicitação"]),
-        "dt_real_visita": _pick(df, ["Data da vistoria", "Data de realização"]),
-        "dt_conc": _pick(df, ["Data da conclusão", "Conclusão"]),
-        "orcamento": _pick(df, ["Orçamento", "Custo estimado", "Valor"]),
+        "om": _pick(df, ["OM", "OM beneficiada", "OM apoiada", "Organização Militar"]),
+        "diretoria": _pick(df, ["Diretoria", "Dir responsável", "DIR", "Direção"]),
+        "especialidade": _pick(df, [
+            "Especialidade", "Especialidade envolvida", "Tipo/Especialidade",
+            "Engenharia", "Área técnica", "Filtro - qual a especialidade da VT"
+        ]),
+        "prioridade": _pick(df, [
+            "Prioridade", "Classificação", "Tratativa da vistoria", "Classe da demanda",
+            "Normal/Prioridade/Urgente/Urgentíssimo"
+        ]),
+        "status": _pick(df, ["Status da Vistoria", "Status", "Situação", "Andamento"]),
+        "dt_solic": _pick(df, ["Data da solicitação", "Dt Solicitação", "Solicitado em"]),
+        "dt_real_visita": _pick(df, ["Data da realização da vistoria", "Data da vistoria", "Realização da visita", "Data visita"]),
+        "dt_conc": _pick(df, ["Data da conclusão da VT", "Data da conclusão", "Conclusão da VT", "Conclusão"]),
+        "orcamento": _pick(df, ["Orçamento estimado", "Valor estimado", "Custo", "PFR", "Total R$", "Orçamento"]),
     }
-
+    
+    # normalizações
     for k in ["dt_solic", "dt_real_visita", "dt_conc"]:
         if COL[k]:
             df[COL[k]] = df[COL[k]].map(_to_date)
-
+    
     if COL["orcamento"]:
         df[COL["orcamento"]] = df[COL["orcamento"]].map(_safe_num)
-
-    # Campo de emergência inferido
-    df["Classificação"] = np.where(
-        df[COL["prioridade"]].astype(str).str.contains("Urgente|Emerg", case=False, na=False),
-        "Emergencial", "Não Emergencial"
-    )
+    
+    # Campo de emergência (seguro mesmo sem coluna)
+    if COL["prioridade"] and COL["prioridade"] in df.columns:
+        df["Classificação"] = np.where(
+            df[COL["prioridade"]].astype(str).str.contains("urg|emerg", case=False, na=False),
+            "Emergencial", "Não Emergencial"
+        )
+    else:
+        df["Classificação"] = "Não Informado"
 
     # =========================================================
     # Filtros laterais
     # =========================================================
     with st.sidebar:
         st.header("Filtros")
-        if COL["dt_solic"]:
-            min_d = df[COL["dt_solic"]].min()
-            max_d = df[COL["dt_solic"]].max()
-            periodo = st.date_input("Período", (min_d.date(), max_d.date()))
+    
+        # período
+        if COL["dt_solic"] and COL["dt_solic"] in df.columns:
+            min_d = pd.to_datetime(df[COL["dt_solic"]]).min()
+            max_d = pd.to_datetime(df[COL["dt_solic"]]).max()
+            periodo = st.date_input(
+                "Período",
+                (min_d.date() if pd.notna(min_d) else datetime(2025,1,1).date(),
+                 max_d.date() if pd.notna(max_d) else datetime.today().date())
+            )
         else:
-            periodo = (datetime(2025, 1, 1), datetime.today())
-
-        om_sel = st.multiselect("OM", sorted(df[COL["om"]].dropna().unique()))
-        esp_sel = st.multiselect("Especialidade", sorted(df[COL["especialidade"]].dropna().unique()))
-        stat_sel = st.multiselect("Status", sorted(df[COL["status"]].dropna().unique()))
-
+            periodo = (datetime(2025,1,1).date(), datetime.today().date())
+    
+        def _opts(key):
+            col = COL.get(key)
+            if col and col in df.columns:
+                return sorted(df[col].dropna().astype(str).unique())
+            return []
+    
+        om_sel  = st.multiselect("OM", _opts("om"))
+        esp_sel = st.multiselect("Especialidade", _opts("especialidade"))
+        stat_sel= st.multiselect("Status", _opts("status"))
+    
+    # aplica filtros
     mask = pd.Series(True, index=df.index)
-    if COL["dt_solic"]:
+    
+    if COL["dt_solic"] and COL["dt_solic"] in df.columns:
         mask &= df[COL["dt_solic"]].between(pd.to_datetime(periodo[0]), pd.to_datetime(periodo[1]))
-    if om_sel:
-        mask &= df[COL["om"]].isin(om_sel)
-    if esp_sel:
-        mask &= df[COL["especialidade"]].isin(esp_sel)
-    if stat_sel:
-        mask &= df[COL["status"]].isin(stat_sel)
-
+    
+    if om_sel and COL["om"] and COL["om"] in df.columns:
+        mask &= df[COL["om"]].astype(str).isin(om_sel)
+    
+    if esp_sel and COL["especialidade"] and COL["especialidade"] in df.columns:
+        mask &= df[COL["especialidade"]].astype(str).isin(esp_sel)
+    
+    if stat_sel and COL["status"] and COL["status"] in df.columns:
+        mask &= df[COL["status"]].astype(str).isin(stat_sel)
+    
     dff = df[mask].copy()
 
     # =========================================================
@@ -142,16 +169,26 @@ def main():
     # =========================================================
     st.subheader("Indicadores de Desempenho")
     col1, col2, col3, col4 = st.columns(4)
+    
     col1.metric("Total de Vistorias", len(dff))
-    col2.metric("% Emergenciais", f"{100 * dff['Classificação'].eq('Emergencial').mean():.1f}%")
-    if COL["orcamento"]:
-        col3.metric("Orçamento Total", f"R$ {dff[COL['orcamento']].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+    
+    # % emergenciais (só conta se houver "Emergencial"/"Não Emergencial")
+    if "Classificação" in dff.columns:
+        base_emerg = dff["Classificação"].isin(["Emergencial","Não Emergencial"])
+        pct_emerg = 100 * dff.loc[base_emerg, "Classificação"].eq("Emergencial").mean() if base_emerg.any() else np.nan
+        col2.metric("% Emergenciais", f"{pct_emerg:.1f}%" if pd.notna(pct_emerg) else "—")
+    else:
+        col2.metric("% Emergenciais", "—")
+    
+    if COL["orcamento"] and COL["orcamento"] in dff.columns:
+        total_r$ = dff[COL["orcamento"]].sum()
+        col3.metric("Orçamento Total", f"R$ {total_r$:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
     else:
         col3.metric("Orçamento Total", "—")
-    if COL["dt_solic"] and COL["dt_conc"]:
-        dff["Tempo Execução (dias)"] = (dff[COL["dt_conc"]] - dff[COL["dt_solic"]]).dt.days
-        media = dff["Tempo Execução (dias)"].mean()
-        col4.metric("Prazo Médio de Execução", f"{media:.1f} dias")
+    
+    if (COL["dt_solic"] and COL["dt_solic"] in dff.columns) and (COL["dt_conc"] and COL["dt_conc"] in dff.columns):
+        prazo = (dff[COL["dt_conc"]] - dff[COL["dt_solic"]]).dt.days
+        col4.metric("Prazo Médio de Execução", f"{prazo.mean():.1f} dias" if len(prazo.dropna()) else "—")
     else:
         col4.metric("Prazo Médio de Execução", "—")
 
@@ -160,30 +197,35 @@ def main():
     # =========================================================
     st.subheader("Visualizações Analíticas")
 
-    # 1. Gráfico temporal (função)
-    if COL["dt_solic"]:
-        df_mes = dff.groupby(dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp()).size().reset_index(name="qtd")
+# 1. Série temporal
+    if COL["dt_solic"] and COL["dt_solic"] in dff.columns:
+        df_mes = (dff.groupby(dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp())
+                     .size().reset_index(name="qtd"))
         fig1 = px.line(df_mes, x=COL["dt_solic"], y="qtd", title="Evolução Mensal das Vistorias", markers=True)
         fig1.update_traces(line_shape="spline")
         st.plotly_chart(fig1, use_container_width=True)
-
-    # 2. Distribuição por Status
-    if COL["status"]:
+    
+    # 2. Status
+    if COL["status"] and COL["status"] in dff.columns:
         fig2 = px.pie(dff, names=COL["status"], title="Distribuição por Status", hole=0.45)
         st.plotly_chart(fig2, use_container_width=True)
-
+    
     # 3. Top OMs
-    if COL["om"]:
+    if COL["om"] and COL["om"] in dff.columns:
         top_om = dff.groupby(COL["om"]).size().nlargest(10).reset_index(name="Qtd")
         fig3 = px.bar(top_om, x="Qtd", y=COL["om"], orientation="h", title="Top 10 OMs — Quantidade de Vistorias")
         st.plotly_chart(fig3, use_container_width=True)
-
-    # 4. Orçamento por Classificação
-    if COL["orcamento"]:
+    
+    # 4. Orçamento por classificação
+    if (COL["orcamento"] and COL["orcamento"] in dff.columns) and ("Classificação" in dff.columns):
         by_class = dff.groupby("Classificação")[COL["orcamento"]].sum().reset_index()
         fig4 = px.bar(by_class, x="Classificação", y=COL["orcamento"], text_auto=".2s", title="Orçamento por Classificação")
         st.plotly_chart(fig4, use_container_width=True)
 
+    missing = [k for k,v in COL.items() if k in ["om","status","especialidade","dt_solic"] and not v]
+    if missing:
+        st.warning("Colunas não encontradas na base: " + ", ".join(missing) +
+                   ". O dashboard continua funcionando, mas alguns filtros/gráficos serão ocultados.")
     # =========================================================
     # Tabela detalhada
     # =========================================================
