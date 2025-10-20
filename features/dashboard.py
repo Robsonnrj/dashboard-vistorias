@@ -208,38 +208,48 @@ def page():
     # ====== exportação ======
     st.subheader("Exportar Relatório Resumido")
     if st.button("Gerar DOCX"):
-        from docx import Document
-        doc = Document()
-        doc.add_heading("Relatório Resumido — Vistorias CRO/1", 0)
-        doc.add_paragraph(f"Gerado em {datetime.now():%d/%m/%Y %H:%M}")
-
-        doc.add_heading("Indicadores Principais", level=2)
-        doc.add_paragraph(f"Total de Vistorias: {len(dff)}")
-        doc.add_paragraph(f"% Emergenciais: {100 * dff['Classificação'].eq('Emergencial').mean():.1f}%")
-        if COL["orcamento"] and COL["orcamento"] in dff.columns:
-            doc.add_paragraph(
-                f"Orçamento Total: R$ {dff[COL['orcamento']].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        try:
+            from docx import Document  # <-- precisa do pacote python-docx
+        except ModuleNotFoundError:
+            st.error(
+                "Pacote **python-docx** não está instalado. "
+                "Adicione `python-docx==0.8.11` ao seu `requirements.txt` e faça o deploy novamente."
             )
-        if "Tempo Execução (dias)" in dff.columns:
-            doc.add_paragraph(f"Prazo Médio de Execução: {dff['Tempo Execução (dias)'].mean():.1f} dias")
+        else:
+            doc = Document()
+            doc.add_heading("Relatório Resumido — Vistorias CRO/1", 0)
+            doc.add_paragraph(f"Gerado em {datetime.now():%d/%m/%Y %H:%M}")
 
-        doc.add_heading("Tabela de Vistorias", level=2)
-        t = doc.add_table(rows=1, cols=len(dff.columns))
-        hdr_cells = t.rows[0].cells
-        for j, c in enumerate(dff.columns):
-            hdr_cells[j].text = c
-        for _, row in dff.head(25).iterrows():
-            row_cells = t.add_row().cells
+            doc.add_heading("Indicadores Principais", level=2)
+            doc.add_paragraph(f"Total de Vistorias: {len(dff)}")
+            doc.add_paragraph(f"% Emergenciais: {100 * dff['Classificação'].eq('Emergencial').mean():.1f}%")
+            if COL["orcamento"] and COL["orcamento"] in dff.columns:
+                doc.add_paragraph(
+                    f"Orçamento Total: R$ {dff[COL['orcamento']].sum():,.2f}"
+                    .replace(",", "X").replace(".", ",").replace("X", ".")
+                )
+            if "Tempo Execução (dias)" in dff.columns:
+                doc.add_paragraph(f"Prazo Médio de Execução: {dff['Tempo Execução (dias)'].mean():.1f} dias")
+
+            doc.add_heading("Tabela de Vistorias", level=2)
+            t = doc.add_table(rows=1, cols=len(dff.columns))
+            hdr_cells = t.rows[0].cells
             for j, c in enumerate(dff.columns):
-                row_cells[j].text = str(row[c]) if pd.notna(row[c]) else ""
+                hdr_cells[j].text = c
+            for _, row in dff.head(25).iterrows():
+                row_cells = t.add_row().cells
+                for j, c in enumerate(dff.columns):
+                    row_cells[j].text = str(row[c]) if pd.notna(row[c]) else ""
 
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-        st.download_button(
-            "📄 Baixar Relatório DOCX",
-            data=buffer,
-            file_name="Relatorio_Vistorias_CRO1.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-        )
+            import io
+            bio = io.BytesIO()
+            doc.save(bio)
+            bio.seek(0)
+            st.download_button(
+                "📄 Baixar Relatório DOCX",
+                data=bio,
+                file_name="Relatorio_Vistorias_CRO1.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+
