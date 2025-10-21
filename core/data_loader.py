@@ -8,6 +8,7 @@ from google.oauth2.service_account import Credentials
 import streamlit as st
 from typing import Optional
 import time
+from core.utils import norm, pick_col
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
