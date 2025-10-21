@@ -11,9 +11,9 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import streamlit as st
-
 from core.data_loader import read_df
 from core.config import TAB_SOLICITACOES
+from core.utils import pick_col
 
 # ----------------------- helpers -----------------------
 def _nf(s: str) -> str:
@@ -51,7 +51,17 @@ def _safe_num(x):
 # ----------------------- page() -----------------------
 def page():
     st.caption("Use os filtros ao lado para refinar os indicadores.")
-
+    
+    st.header("📊 Dashboard Operacional — Seção de Vistorias")
+    tab_base = st.session_state["tabs_map"]["solicitacoes"]
+    df = read_df(tab_base)
+    if df.empty:
+        st.info("Sem dados ainda.")
+        return
+    c_dir = pick_col(df, ["diretoria", "Diretoria Responsável", "Diretoria"])
+    c_sit = pick_col(df, ["status_atual", "Situação", "Situacao", "STATUS"])
+    c_data = pick_col(df, ["data_limite", "DATA DA SOLICITACAO", "DATA"])
+    
     # ====== carga ======
     try:
         df_raw = read_df(TAB_SOLICITACOES)
