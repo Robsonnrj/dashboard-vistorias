@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 from core.config import TAB_SOLICITACOES, TAB_AUDIT, TAB_VALIDACAO
 from core.data_loader import read_df, overwrite_tab_from_df
+from core.utils import pick_col
 
 URGENCIAS = ["Não Prioridade", "Prioridade", "Urgente"]
 SITUACOES = ["Não Atendida", "Em andamento", "Finalizada"]
@@ -119,6 +120,12 @@ def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) ->
 # -----------------------------
 def page():
     st.header("🔁 VIS-003 — Controle de Status e Auditoria")
+    tab_base = st.session_state["tabs_map"]["solicitacoes"]
+    df = read_df(tab_base)
+    if df.empty:
+        st.info("Sem dados para auditoria.")
+        return
+    col_num = pick_col(df, ["numero", "número", "num", "nº", "id", "protocolo"])
 
     try:
         df = read_df(TAB_SOLICITACOES)
