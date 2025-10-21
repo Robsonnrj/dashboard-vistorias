@@ -25,7 +25,7 @@ def _mes_label(s):
 def _fmt_rs(v):
     if pd.isna(v): return "—"
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
+
 def _to_date(x):
     """Converte para Timestamp (brasil: dayfirst=True), devolvendo NaT em erros."""
     if pd.isna(x):
@@ -65,8 +65,8 @@ def page():
 
     # ---- Mapeamento tolerante das colunas principais ----
     COL = {
-        "om": pick_col(df, ["OM", "OM beneficiada", "OM apoiada", "Organização Militar"]),
-        "diretoria": pick_col(df, ["Diretoria", "Dir responsável", "DIR", "Direção"]),
+        "om": pick_col(df, ["OM", "OM beneficiada", "OM apoiada", "Organização Militar", "OM APOIADA"]),
+        "diretoria": pick_col(df, ["Diretoria", "Dir responsável", "DIR", "Direção", "Diretoria Responsável"]),
         "especialidade": pick_col(df, [
             "Especialidade", "Especialidade envolvida", "Tipo/Especialidade",
             "Engenharia", "Área técnica", "Filtro - qual a especialidade da VT"
@@ -76,25 +76,29 @@ def page():
             "Normal/Prioridade/Urgente/Urgentíssimo"
         ]),
         "status": pick_col(df, ["Status da Vistoria", "Status", "Situação", "Andamento"]),
-        "dt_solic": pick_col(df, ["Data da solicitação", "Dt Solicitação", "Solicitado em"]),
+        "dt_solic": pick_col(df, ["Data da solicitação", "Dt Solicitação", "Solicitado em", "DATA DA SOLICITAÇÃO"]),
         "dt_real_visita": pick_col(df, [
-            "Data da realização da vistoria", "Data da vistoria", "Realização da visita", "Data visita"
+            "Data da realização da vistoria", "Data da vistoria", "Realização da visita",
+            "Data visita", "DATA DA VISTORIA"
         ]),
         "dt_conc": pick_col(df, [
-            "Data da conclusão da VT", "Data da conclusão", "Conclusão da VT", "Conclusão"
+            "Data da conclusão da VT", "Data da conclusão", "Conclusão da VT", "Conclusão",
+            "DATA/PREVISÃO DE CONCLUSÃO"
         ]),
+        # extra: algumas planilhas trazem data de resposta
+        "dt_resp": pick_col(df, ["DATA DA RESPOSTA A SOLICITAÇÃO", "Data da resposta"]),
         "orcamento": pick_col(df, ["Orçamento estimado", "Valor estimado", "Custo", "PFR", "Total R$", "Orçamento"]),
     }
 
     # ---- Normalização de datas e valores ----
-    for k in ["dt_solic", "dt_real_visita", "dt_conc"]:
+    for k in ["dt_solic", "dt_real_visita", "dt_conc", "dt_resp"]:
         if COL[k]:
             df[COL[k]] = df[COL[k]].map(_to_date)
 
     if COL["orcamento"]:
         df[COL["orcamento"]] = df[COL["orcamento"]].map(_safe_num)
 
-    # ---- Emergencialidade (KPI) ----
+    # ---- Emergencialidade (KPI antigo) ----
     if COL["prioridade"]:
         df["Classificação"] = np.where(
             df[COL["prioridade"]].astype(str).str.contains("urg|emerg", case=False, na=False),
@@ -159,7 +163,7 @@ def page():
 
     dff = df[mask].copy()
 
-    # Prazo de execução
+    # Prazo de execução (antigo)
     if COL["dt_solic"] and COL["dt_conc"]:
         dff["Tempo Execução (dias)"] = (dff[COL["dt_conc"]] - dff[COL["dt_solic"]]).dt.days
 
@@ -180,149 +184,151 @@ def page():
             if qtd_nat > 0 and not incluir_sem_data:
                 st.info("Há vistorias **sem data**. Marque 'Incluir vistorias sem data de solicitação' para exibi-las.")
 
-    # ----------------------- KPIs -----------------------
-    st.subheader("Indicadores de Desempenho")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total de Vistorias", len(dff))
+    # ============================================================
+    # ========== PARÂMETROS DO BILHETE (PEDIDOS/ATENDIDAS) =======
+    # ============================================================
 
-    if "Classificação" in dff.columns and not dff.empty:
-        base_emerg = dff["Classificação"].isin(["Emergencial", "Não Emergencial"])
-        pct_emerg = (100 * dff.loc[base_emerg, "Classificação"].eq("Emergencial").mean()
-                     if base_emerg.any() else np.nan)
-        c2.metric("% Emergenciais", f"{pct_emerg:.1f}%" if pd.notna(pct_emerg) else "—")
+    # regras: o que é atendida?
+    def _eh_atendida(row) -> bool:
+        textos = []
+        if COL["status"]:
+            textos.append(str(row[COL["status"]] or ""))
+        if "STATUS - ATUALIZAÇÃO SEMANAL" in dff.columns:
+            textos.append(str(row["STATUS - ATUALIZAÇÃO SEMANAL"] or ""))
+        j = " ".join(textos).lower()
+
+        if any(p in j for p in ["finaliz", "conclu", "atendid"]):
+            return True
+        if COL["dt_conc"] and pd.notna(row[COL["dt_conc"]]):
+            return True
+        if COL["dt_resp"] and pd.notna(row[COL["dt_resp"]]):
+            return True
+        if COL["dt_real_visita"] and pd.notna(row[COL["dt_real_visita"]]):
+            # se quiser considerar “vistoriada” como atendida
+            return True
+        return False
+
+    # flags
+    if COL["dt_solic"]:
+        dff["_pedido"] = dff[COL["dt_solic"]].notna()
+        dff["_mes"] = dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp()
     else:
-        c2.metric("% Emergenciais", "—")
+        dff["_pedido"] = True
+        dff["_mes"] = pd.NaT
 
-    if COL["orcamento"] and COL["orcamento"] in dff.columns:
-        total_rs = dff[COL["orcamento"]].sum(skipna=True)
-        c3.metric(
-            "Orçamento Total",
-            f"R$ {total_rs:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            if not np.isnan(total_rs) else "—"
+    dff["_atendida"] = dff.apply(_eh_atendida, axis=1)
+    dff["_nao_atendida"] = dff["_pedido"] & (~dff["_atendida"])
+
+    # data fim para tempo de atendimento
+    def _data_fim(row):
+        for k in ("dt_conc", "dt_resp", "dt_real_visita"):
+            c = COL.get(k)
+            if c and pd.notna(row.get(c, pd.NaT)):
+                return row[c]
+        return pd.NaT
+
+    dff["_fim"] = dff.apply(_data_fim, axis=1)
+    if COL["dt_solic"]:
+        dff["_tempo_dias"] = (dff["_fim"] - dff[COL["dt_solic"]]).dt.days
+    else:
+        dff["_tempo_dias"] = np.nan
+
+    # KPIs do bilhete
+    st.subheader("Indicadores de Desempenho (atualizados)")
+    c1, c2, c3, c4, c5 = st.columns(5)
+
+    tot_ped = int(dff["_pedido"].sum())
+    tot_atd = int(dff["_atendida"].sum())
+    pct_atd = (100 * tot_atd / tot_ped) if tot_ped else np.nan
+    tempo_medio = dff.loc[dff["_tempo_dias"].notna(), "_tempo_dias"].mean()
+
+    # série mensal
+    mensal = (
+        dff.groupby("_mes")
+           .agg(pedidos=("_pedido", "sum"), atendidas=("_atendida", "sum"))
+           .reset_index()
+           .sort_values("_mes")
+    )
+    mensal["backlog"] = (mensal["pedidos"] - mensal["atendidas"]).cumsum()
+
+    c1.metric("Pedidos (solicitações)", f"{tot_ped}")
+    c2.metric("Atendidas", f"{tot_atd}")
+    c3.metric("% Atendimento", f"{pct_atd:.1f}%" if pd.notna(pct_atd) else "—")
+    c4.metric("Tempo médio de atendimento", f"{tempo_medio:.1f} dias" if pd.notna(tempo_medio) else "—")
+    c5.metric("Backlog acumulado", int(mensal["backlog"].iloc[-1]) if not mensal.empty else 0)
+
+    # Linha: Pedidos x Atendidas (+ backlog)
+    st.subheader("Evolução mensal — Pedidos x Atendidas")
+    if COL["dt_solic"] and not mensal.empty:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["pedidos"],
+                                 mode="lines+markers", name="Pedidos"))
+        fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["atendidas"],
+                                 mode="lines+markers", name="Atendidas"))
+        fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["backlog"],
+                                 mode="lines", name="Backlog (acum.)"))
+        fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Sem dados de 'Data da solicitação' suficientes para a série temporal.")
+
+    # Colunas empilhadas: Diretoria — Atendidas x Não atendidas
+    st.subheader("Diretoria — Atendidas x Não atendidas")
+    if COL["diretoria"]:
+        base_dir = (
+            dff.groupby(COL["diretoria"])
+               .agg(Atendidas=("_atendida", "sum"), Nao_Atendidas=("_nao_atendida", "sum"))
+               .reset_index()
         )
+        base_dir = base_dir.sort_values(["Atendidas", "Nao_Atendidas"], ascending=[False, False])
+        fig = go.Figure()
+        fig.add_bar(x=base_dir[COL["diretoria"]], y=base_dir["Atendidas"], name="Atendidas")
+        fig.add_bar(x=base_dir[COL["diretoria"]], y=base_dir["Nao_Atendidas"], name="Não atendidas")
+        fig.update_layout(barmode="stack", xaxis_title="Diretoria", yaxis_title="Qtd")
+        st.plotly_chart(fig, use_container_width=True)
     else:
-        c3.metric("Orçamento Total", "—")
+        st.info("Coluna de Diretoria não encontrada.")
 
-    if "Tempo Execução (dias)" in dff.columns and dff["Tempo Execução (dias)"].notna().any():
-        c4.metric("Prazo Médio de Execução", f"{dff['Tempo Execução (dias)'].mean():.1f} dias")
-    else:
-        c4.metric("Prazo Médio de Execução", "—")
+    # Pizza: Atendidas x Não atendidas
+    st.subheader("Participação — Atendidas x Não atendidas")
+    pie = pd.DataFrame({
+        "Categoria": ["Atendidas", "Não atendidas"],
+        "Qtd": [int(dff["_atendida"].sum()), int(dff["_nao_atendida"].sum())]
+    })
+    fig = px.pie(pie, names="Categoria", values="Qtd", hole=0.45)
+    st.plotly_chart(fig, use_container_width=True)
 
-    # ----------------------- Visualizações no estilo Excel -----------------------
-    st.subheader("📈 Visualizações no estilo Excel")
-    tabs = st.tabs(["Linha", "Colunas / Barras", "Pizza / Rosca", "Radar"])
-
-    # Linha (multi-série por Status)
-    with tabs[0]:
-        if COL["dt_solic"] and COL["status"]:
-            dff["_mes"] = _mes_label(dff[COL["dt_solic"]])
-            base = (
-                dff.groupby(["_mes", COL["status"]])
-                   .size()
-                   .reset_index(name="qtd")
-                   .sort_values("_mes")
-            )
-            fig = px.line(
-                base, x="_mes", y="qtd", color=COL["status"],
-                markers=True, title="Evolução mensal por Status"
-            )
-            fig.update_traces(mode="lines+markers")
-            fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd", legend_title="Status")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Preciso de Data da Solicitação e Status para montar esta linha.")
-
-    # Colunas / Barras
-    with tabs[1]:
-        col_a, col_b = st.columns(2)
-        # Colunas agrupadas por mês e classificação
-        with col_a:
-            if COL["dt_solic"] and "Classificação" in dff.columns:
-                dff["_mes"] = _mes_label(dff[COL["dt_solic"]])
-                base = (
-                    dff.groupby(["_mes", "Classificação"])
-                       .size()
-                       .reset_index(name="qtd")
-                )
-                fig = px.bar(
-                    base, x="_mes", y="qtd", color="Classificação", barmode="group",
-                    title="Colunas — por mês x classificação"
-                )
-                fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Preciso de Data da Solicitação e Classificação.")
-
-        # Barras horizontais Top 10 OMs
-        with col_b:
-            if COL["om"]:
-                top_om = (
-                    dff.groupby(COL["om"]).size().nlargest(10)
-                       .reset_index(name="Qtd")
-                       .sort_values("Qtd")
-                )
-                fig = px.bar(
-                    top_om, x="Qtd", y=COL["om"], orientation="h",
-                    title="Barras — Top 10 OMs por quantidade"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Preciso da coluna OM.")
-
-    # Pizza / Rosca
-    with tabs[2]:
-        col_a, col_b = st.columns(2)
-        # Pizza por Status
-        with col_a:
-            if COL["status"]:
-                fig = px.pie(
-                    dff, names=COL["status"], title="Pizza — participação por Status"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Preciso da coluna Status.")
-        # Rosca por Classificação (em R$ se houver orçamento)
-        with col_b:
-            if "Classificação" in dff.columns and COL["orcamento"]:
-                base = dff.groupby("Classificação")[COL["orcamento"]].sum().reset_index()
-                fig = px.pie(
-                    base, names="Classificação", values=COL["orcamento"],
-                    hole=0.55, title="Rosca — orçamento por classificação"
-                )
-                fig.update_traces(textposition="inside")
-                st.plotly_chart(fig, use_container_width=True)
-            elif "Classificação" in dff.columns:
-                fig = px.pie(dff, names="Classificação", hole=0.55,
-                             title="Rosca — participação por classificação")
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Preciso da Classificação (Emergencial/Não).")
-
-    # Radar (categorias em eixo polar)
-    with tabs[3]:
-        eixo = None
-        if COL["especialidade"]:
-            eixo = COL["especialidade"]
-            titulo = "Radar — distribuição por Especialidade"
-        elif COL["status"]:
-            eixo = COL["status"]
-            titulo = "Radar — distribuição por Status"
-        if eixo:
-            base = dff.groupby(eixo).size().reset_index(name="qtd")
-            base = base.sort_values("qtd", ascending=False).head(10)  # mantém legível
-
+    # Radar — tempo médio por OM (top 10)
+    st.subheader("Radar — Tempo médio de atendimento por OM (top 10)")
+    if COL["om"]:
+        rad = (
+            dff.loc[dff["_tempo_dias"].notna()]
+               .groupby(COL["om"])["_tempo_dias"].mean()
+               .sort_values(ascending=False).head(10).reset_index()
+        )
+        if not rad.empty:
             fig = go.Figure()
-            fig.add_trace(go.Scatterpolar(
-                r=base["qtd"], theta=base[eixo], fill="toself", name="Qtd"
-            ))
-            fig.update_layout(
-                title=titulo,
-                polar=dict(radialaxis=dict(visible=True)),
-                showlegend=False,
-            )
+            fig.add_trace(go.Scatterpolar(r=rad["_tempo_dias"], theta=rad[COL["om"]],
+                                          fill="toself", name="dias"))
+            fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Preciso de Especialidade ou Status para o radar.")
+            st.info("Ainda não há pares data_solicitação x data_fim suficientes para o radar.")
+    else:
+        st.info("Coluna de OM não encontrada.")
+
+    # Mantido: Diretoria por OM — quantidade
+    st.subheader("Diretoria por OM — quantidade de vistorias")
+    if COL["om"] and COL["diretoria"]:
+        top = (dff.groupby([COL["diretoria"], COL["om"]]).size()
+                 .reset_index(name="Qtd")
+                 .sort_values("Qtd", ascending=False)
+                 .head(15))
+        fig = px.bar(top, x="Qtd", y=COL["om"], color=COL["diretoria"], orientation="h",
+                     title="Top OMs por Diretoria (Qtd de vistorias)")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Preciso das colunas Diretoria e OM.")
 
     # ----------------------- Visualizações (as suas originais) -----------------------
     st.subheader("Visualizações Analíticas")
@@ -333,7 +339,7 @@ def page():
             dff.groupby(dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp())
                .size()
                .reset_index(name="qtd")
-            .sort_values(COL["dt_solic"])
+               .sort_values(COL["dt_solic"])
         )
         fig1 = px.line(df_mes, x=COL["dt_solic"], y="qtd",
                        title="Evolução Mensal das Vistorias", markers=True)
