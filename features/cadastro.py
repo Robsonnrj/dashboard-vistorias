@@ -7,18 +7,22 @@ from core.data_loader import append_row, read_df
 from core.utils import norm, pick_col
 
 
+def _N(x: str) -> str:
+    """Normaliza string: strip + upper (para siglas/chaves)."""
+    return (str(x or "")).strip().upper()
+
+
 @st.cache_data(ttl=600)
 def _load_oms_validadas() -> pd.DataFrame:
     """
-    Lê a aba 'Validacao_de_Dados' já tratada pelo read_df (que resolve o cabeçalho)
-    e mapeia as colunas por sinônimos. NÃO tenta redetectar cabeçalho em df.values.
+    Lê a aba 'Validacao_de_Dados' já tratada pelo read_df e mapeia as colunas por sinônimos.
+    Retorna um DF com colunas: om_sigla, om_nome, diretoria (todas sem espaços extras).
     """
     df = read_df("Validacao_de_Dados", use_cache=False)
     if df is None or df.empty:
         st.error("Base de validação vazia ou não encontrada.")
         return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
 
-    # Detecta colunas por sinônimos (tolerante)
     col_sigla = pick_col(df, [
         "sigla", "sigla om", "om (sigla)", "sigla da om", "om sigla", "sigla/om",
         "om", "om solicitante (sigla)"
@@ -36,7 +40,6 @@ def _load_oms_validadas() -> pd.DataFrame:
     if not col_sigla: missings.append("OM/Sigla")
     if not col_nome:  missings.append("Nome da OM")
     if not col_dir:   missings.append("Diretoria")
-
     if missings:
         with st.expander("🔎 Diagnóstico — colunas disponíveis na aba de validação"):
             st.write(list(df.columns))
@@ -52,45 +55,59 @@ def _load_oms_validadas() -> pd.DataFrame:
           [["om_sigla", "om_nome", "diretoria"]]
           .copy()
     )
-
+    # limpeza e normalização
     for c in ["om_sigla", "om_nome", "diretoria"]:
         df_out[c] = df_out[c].astype(str).str.strip()
-
-    # limpa vazios e duplicados
+    # remove linhas vazias
     df_out = df_out[(df_out["om_sigla"] != "") & (df_out["diretoria"] != "")]
-    df_out = df_out.drop_duplicates(subset=["om_sigla", "diretoria"], keep="first")
+    # normaliza sigla para UPPER para chaves consistentes
+    df_out["om_sigla_norm"] = df_out["om_sigla"].map(_N)
+    # remove duplicados por sigla normalizada
+    df_out = df_out.drop_duplicates(subset=["om_sigla_norm"], keep="first").reset_index(drop=True)
 
-    # Diagnóstico opcional
+    # diagnóstico opcional
     with st.expander("🧭 Mapeamento detectado na validação"):
-        st.write({"sigla": col_sigla, "nome": col_nome, "diretoria": col_dir})
         st.write(f"OMs válidas: {len(df_out)}")
+        st.write(df_out.head(10))
 
-    return df_out
+    return df_out[["om_sigla", "om_nome", "diretoria", "om_sigla_norm"]]
 
 
 def _build_om_options(oms_df: pd.DataFrame):
+    """
+    Monta:
+      - options_display: lista para o select (ex.: 'IME — Instituto Militar de Engenharia')
+      - disp_to_sigla:   display -> SIGLA (original)
+      - sigla_to_dir:    SIGLA_NORMALIZADA -> Diretoria
+      - disp_to_dir:     display -> Diretoria
+    """
     if oms_df.empty:
         return ["Outra / não listada…"], {"Outra / não listada…": ""}, {}, {"Outra / não listada…": ""}
-    options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria = [], {}, {}, {}
+
+    options_display, disp_to_sigla, sigla_to_dir, disp_to_dir = [], {}, {}, {}
     for _, r in oms_df.iterrows():
-        sigla = r["om_sigla"]
-        nome = r["om_nome"]
-        diretoria = r["diretoria"]
+        sigla = (r["om_sigla"] or "").strip()
+        sigla_norm = _N(sigla)
+        nome = (r["om_nome"] or "").strip()
+        diretoria = (r["diretoria"] or "").strip()
+
         display = f"{sigla} — {nome}" if nome else sigla
         options_display.append(display)
         disp_to_sigla[display] = sigla
-        sigla_to_diretoria[sigla] = diretoria
-        disp_to_diretoria[display] = diretoria
+        sigla_to_dir[sigla_norm] = diretoria
+        disp_to_dir[display] = diretoria
+
+    # opção manual
     options_display.append("Outra / não listada…")
     disp_to_sigla["Outra / não listada…"] = ""
-    disp_to_diretoria["Outra / não listada…"] = ""
-    return options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria
+    disp_to_dir["Outra / não listada…"] = ""
+
+    return options_display, disp_to_sigla, sigla_to_dir, disp_to_dir
 
 
 def _input_row():
     st.subheader("📥 Nova solicitação de vistoria")
 
-    # carrega validação
     oms_df = _load_oms_validadas()
     options, disp2sig, sig2dir, disp2dir = _build_om_options(oms_df)
     st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
@@ -104,22 +121,17 @@ def _input_row():
             key="om_choice",
             placeholder="Selecione ou digite…"
         )
-        om_sigla = disp2sig.get(om_display, "")
 
+        # OM e diretoria derivadas da seleção (determinístico)
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
-            st.session_state["diretoria_auto"] = ""
         else:
-            default_dir = disp2dir.get(om_display, "") or sig2dir.get(om_sigla, "")
-            st.session_state["diretoria_auto"] = default_dir
-            # usar uma chave diferente do valor de sessão para evitar conflito
-            diretoria = st.text_input(
-                "Diretoria responsável *",
-                value=st.session_state.get("diretoria_auto", ""),
-                disabled=True,
-                key="diretoria_auto_input"
-            )
+            om_sigla = disp2sig.get(om_display, "")
+            diretoria = disp2dir.get(om_display) or sig2dir.get(_N(om_sigla), "")
+            # atualiza sessão e mostra campo somente-leitura que sempre reflete a seleção
+            st.session_state["diretoria_view"] = diretoria
+            st.text_input("Diretoria responsável *", key="diretoria_view", disabled=True)
 
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria *",
@@ -155,16 +167,17 @@ def _input_row():
 
     # Validações
     erros = []
-    if not (om_sigla or "").strip():
-        erros.append("Informe a **OM**.")
     if om_display == "Outra / não listada…":
+        if not (om_sigla or "").strip():
+            erros.append("Informe a **OM**.")
         if not (diretoria or "").strip():
             erros.append("Informe a **diretoria** (manual).")
     else:
-        if not (st.session_state.get("diretoria_auto", "") or "").strip():
+        if not (om_sigla or "").strip():
+            erros.append("Informe a **OM**.")
+        # diretoria vem do dicionário; garante
+        if not (diretoria or "").strip():
             erros.append("Diretoria não encontrada para a OM selecionada.")
-        else:
-            diretoria = st.session_state.get("diretoria_auto", "")
 
     if not (local or "").strip():
         erros.append("Informe o **local/instalação**.")
@@ -174,6 +187,7 @@ def _input_row():
     if erros:
         st.warning("Campos obrigatórios não preenchidos:\n\n• " + "\n• ".join(erros))
 
+    # linhas finais (usa diretoria mapeada automaticamente quando não for manual)
     row = {
         "numero": "",
         "data_solicitacao": datetime.now().strftime("%Y-%m-%d %H:%M"),
