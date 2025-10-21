@@ -3,70 +3,27 @@
 import streamlit as st
 from datetime import datetime
 import pandas as pd
-
 from core.data_loader import append_row, read_df
-
-# ===============================
-# Helpers para normalização e busca de colunas
-# ===============================
-def _normalize(text: str) -> str:
-    return str(text).strip().lower()
-
-def _find_column(df: pd.DataFrame, *column_names: str) -> str:
-    columns_map = {_normalize(c): c for c in df.columns}
-    for name in column_names:
-        norm_name = _normalize(name)
-        if norm_name in columns_map:
-            return columns_map[norm_name]
-    for name in column_names:
-        norm_name = _normalize(name)
-        for norm_col, orig_col in columns_map.items():
-            if norm_name in norm_col:
-                return orig_col
-    raise KeyError(f"Coluna(s) '{column_names}' não encontradas em {df.columns.tolist()}")
+from core.utils import norm, pick_col
 
 # ===============================
 # Carrega OMs e Diretorias da aba de validação
 # ===============================
 @st.cache_data(ttl=600)
 def _load_oms_validadas() -> pd.DataFrame:
-    df_raw = read_df("Validacao_de_Dados")
-
-    def _try_promote_header(df: pd.DataFrame) -> pd.DataFrame:
-        if df.empty:
-            return df
-        first_row = df.iloc[0].astype(str).str.lower()
-        cols_lower = [str(c).lower() for c in df.columns]
-        has_expected = lambda x: any(k in x for k in ("om", "sigla", "diretoria", "organizacao"))
-        if (not any(has_expected(col) for col in cols_lower)) and any(has_expected(x) for x in first_row):
-            df_new = df.copy()
-            df_new.columns = df_new.iloc[0]
-            df_new = df_new.drop(df_new.index[0]).reset_index(drop=True)
-            return df_new
-        return df
-
-    df = _try_promote_header(df_raw)
-
-    try:
-        col_sigla = _find_column(df, "om", "sigla")
-        col_nome = _find_column(df, "organização militar", "organizacao militar", "om nome", "nome")
-        col_diretoria = _find_column(df, "diretoria responsável", "diretoria")
-    except KeyError:
-        st.error("Erro ao localizar colunas OM, Nome ou Diretoria na aba de validação.")
-        return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
-
-    out = df[[col_sigla, col_nome, col_diretoria]].copy()
-    out.columns = ["om_sigla", "om_nome", "diretoria"]
-    for c in out.columns:
-        out[c] = out[c].astype(str).str.strip()
-    out = out[(out["om_sigla"] != "") & (out["diretoria"] != "")]
-    out = out.drop_duplicates()
-
-    return out
+    df = read_df("Validacao_de_Dados")
+    col_sigla   = pick_col(df, ["om", "sigla"])
+    col_nome    = pick_col(df, ["organização militar", "organizacao militar", "om nome", "nome"])
+    col_dir     = pick_col(df, ["diretoria responsável", "diretoria responsavel", "diretoria"])
+    df = df.rename(columns={col_sigla: "om_sigla", col_nome: "om_nome", col_dir: "diretoria"})
+    df = df[["om_sigla", "om_nome", "diretoria"]]
+    for c in ["om_sigla", "om_nome", "diretoria"]:
+        df[c] = df[c].astype(str).str.strip()
+    df = df[(df["om_sigla"] != "") & (df["diretoria"] != "")]
+    return df.drop_duplicates(subset=["om_sigla", "diretoria"])
 
 def _build_om_options(oms_df: pd.DataFrame):
     options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria = [], {}, {}, {}
-
     for _, r in oms_df.iterrows():
         sigla = r["om_sigla"]
         nome = r["om_nome"]
@@ -76,11 +33,9 @@ def _build_om_options(oms_df: pd.DataFrame):
         disp_to_sigla[display] = sigla
         sigla_to_diretoria[sigla] = diretoria
         disp_to_diretoria[display] = diretoria
-
     options_display.append("Outra / não listada…")
     disp_to_sigla["Outra / não listada…"] = ""
     disp_to_diretoria["Outra / não listada…"] = ""
-
     return options_display, disp_to_sigla, sigla_to_diretoria, disp_to_diretoria
 
 # ===============================
@@ -90,9 +45,7 @@ def _input_row():
     st.subheader("📥 Nova solicitação de vistoria")
     oms_df = _load_oms_validadas()
     options, disp2sig, sig2dir, disp2dir = _build_om_options(oms_df)
-
     st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
-
     col1, col2 = st.columns(2)
 
     with col1:
@@ -102,9 +55,7 @@ def _input_row():
             key="om_choice",
             placeholder="Selecione ou digite…"
         )
-
         om_sigla = disp2sig.get(om_display, "")
-
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
@@ -118,7 +69,6 @@ def _input_row():
                 disabled=True,
                 key="diretoria_auto"
             )
-
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria *",
             ["Periódica", "Emergencial", "Preventiva", "Extraordinária"],
@@ -192,14 +142,12 @@ def _input_row():
         "QUANTIDADE DE DIAS PARA EXECUÇÃO": str(int(qd_exec)) if qd_exec else "",
         "OBSERVAÇÕES": obs.strip(),
     }
-
     return row, (len(erros) == 0)
 
 # ===============================
 # Página principal
 # ===============================
 def page():
-
     if "main_menu" not in st.session_state:
         st.session_state["main_menu"] = "📊 Dashboard"
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
@@ -233,6 +181,3 @@ def page():
         if st.button("🧹 Limpar Formulário", use_container_width=True):
             st.session_state.clear()
             st.rerun()
-  
-
-
