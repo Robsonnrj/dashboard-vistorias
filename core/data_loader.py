@@ -78,33 +78,70 @@ def _ensure_ws(title: str, header: list[str]):
 @st.cache_data(ttl=300, show_spinner=False)  # Cache de 5 minutos
 def read_df(tab_name: str, use_cache: bool = True) -> pd.DataFrame:
     """
-    Lê uma aba do Sheets como DataFrame.
-    
+    Lê uma aba do Sheets como DataFrame, de forma robusta.
+    - Detecta automaticamente a linha de header (1ª linha não totalmente vazia).
+    - Mantém todas as colunas (faz padding nas linhas mais curtas).
+    - Converte "", "—", "–" e "-" isolado para NA.
+    - Tira espaços extras dos headers e dos valores (strip).
+    - Remove linhas totalmente vazias após a limpeza.
+
     Args:
         tab_name: Nome da aba
-        use_cache: Se False, força recarga (útil após escritas)
-    
-    Returns:
-        DataFrame com os dados da aba
+        use_cache: Mantido só para compor a chave do cache. Para forçar recarga,
+                   chame read_df(tab_name, use_cache=False).
     """
     try:
         ws = _book().worksheet(tab_name)
-        values = ws.get_all_values()
-        
+        values = ws.get_all_values()  # lista de listas
+
         if not values:
             return pd.DataFrame()
-        
-        # Cria headers únicos
-        headers = _make_unique_headers(values[0])
-        
-        # Cria DataFrame
-        df = pd.DataFrame(values[1:], columns=headers)
-        
-        # Substitui strings vazias por NA
-        df = df.replace("", pd.NA)
-        
+
+        # -------- localizar a linha de cabeçalho (primeira linha não totalmente vazia) --------
+        def _is_all_empty(row: list[str]) -> bool:
+            return all((c is None) or (str(c).strip() == "") for c in row)
+
+        header_row_idx = None
+        for i, row in enumerate(values):
+            if not _is_all_empty(row):
+                header_row_idx = i
+                break
+        if header_row_idx is None:
+            return pd.DataFrame()  # planilha sem conteúdo útil
+
+        raw_header = values[header_row_idx]
+
+        # Largura máxima (para padronizar linhas curtas)
+        width = max(len(r) for r in values[header_row_idx:]) if values[header_row_idx:] else len(raw_header)
+
+        # Normalizar header: strip e headers únicos
+        norm_header = [(h or "").strip() for h in raw_header]
+        if len(norm_header) < width:
+            norm_header += [""] * (width - len(norm_header))
+        norm_header = _make_unique_headers(norm_header)
+
+        # -------- montar corpo (linhas após o header) com padding --------
+        body = []
+        for row in values[header_row_idx + 1:]:
+            r = row[:width] + [""] * max(0, width - len(row))
+            body.append(r)
+        if not body:
+            return pd.DataFrame(columns=norm_header)
+
+        df = pd.DataFrame(body, columns=norm_header)
+
+        # -------- limpeza de strings --------
+        for c in df.columns:
+            df[c] = df[c].map(lambda x: x.strip() if isinstance(x, str) else x)
+
+        # mapear vazios e traços para NA
+        df = df.replace(to_replace={"": pd.NA, "—": pd.NA, "–": pd.NA, "-": pd.NA})
+
+        # remover linhas totalmente vazias
+        df = df.dropna(how="all")
+
         return df
-        
+
     except gspread.WorksheetNotFound:
         st.warning(f"⚠️ Aba '{tab_name}' não encontrada no Google Sheets")
         return pd.DataFrame()
