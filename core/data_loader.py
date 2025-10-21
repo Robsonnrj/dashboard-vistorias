@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
-import streamlit as st
-from typing import Optional
 import time
-from core.utils import norm, pick_col
+from typing import Optional
+
+import gspread
+import pandas as pd
+import streamlit as st
+from google.oauth2.service_account import Credentials
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -44,7 +44,7 @@ def _client():
     """Cria cliente autenticado do Google Sheets (cached)."""
     if not has_gsheets():
         raise ValueError("Credenciais do Google Sheets não configuradas em st.secrets")
-    
+
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
@@ -66,12 +66,12 @@ def _ensure_ws(title: str, header: list[str]):
         ws = sh.add_worksheet(title=title, rows=2000, cols=max(10, len(header)))
         ws.update("1:1", [header], value_input_option="USER_ENTERED")
         return ws
-    
+
     # Verifica se o header está correto
     existing_header = ws.row_values(1)
     if existing_header != header:
         ws.update("1:1", [header], value_input_option="USER_ENTERED")
-    
+
     return ws
 
 
@@ -82,7 +82,7 @@ def read_df(tab_name: str, use_cache: bool = True) -> pd.DataFrame:
     - Detecta automaticamente a linha de header (1ª linha não totalmente vazia).
     - Mantém todas as colunas (faz padding nas linhas mais curtas).
     - Converte "", "—", "–" e "-" isolado para NA.
-    - Tira espaços extras dos headers e dos valores (strip).
+    - Faz strip de espaços em headers e valores.
     - Remove linhas totalmente vazias após a limpeza.
 
     Args:
@@ -151,22 +151,16 @@ def read_df(tab_name: str, use_cache: bool = True) -> pd.DataFrame:
 
 
 def overwrite_tab_from_df(
-    tab_name: str, 
-    df: pd.DataFrame, 
+    tab_name: str,
+    df: pd.DataFrame,
     keep_header: bool = True,
-    batch_size: int = 1000
+    batch_size: int = 1000,
 ):
     """
     Sobrescreve a aba inteira com o DataFrame.
-    
-    Args:
-        tab_name: Nome da aba
-        df: DataFrame a ser escrito
-        keep_header: Se True, inclui o cabeçalho
-        batch_size: Tamanho do lote para upload (evita timeout)
     """
     sh = _book()
-    
+
     try:
         ws = sh.worksheet(tab_name)
         ws.clear()
@@ -189,14 +183,14 @@ def overwrite_tab_from_df(
             ws.update("A1", values, value_input_option="USER_ENTERED")
         else:
             for i in range(0, len(values), batch_size):
-                batch = values[i:i + batch_size]
+                batch = values[i : i + batch_size]
                 start_row = i + 1
                 ws.update(f"A{start_row}", batch, value_input_option="USER_ENTERED")
                 time.sleep(0.5)  # Evita rate limiting
-        
+
         # Limpa o cache
         clear_caches()
-        
+
     except Exception as e:
         st.error(f"❌ Erro ao escrever na aba '{tab_name}': {e}")
         raise
@@ -205,13 +199,9 @@ def overwrite_tab_from_df(
 def append_row(tab_name: str, row: dict):
     """
     Adiciona uma linha respeitando o cabeçalho existente.
-    
-    Args:
-        tab_name: Nome da aba
-        row: Dicionário com os dados (chaves = nomes das colunas)
     """
     sh = _book()
-    
+
     try:
         ws = sh.worksheet(tab_name)
     except gspread.WorksheetNotFound:
@@ -222,10 +212,10 @@ def append_row(tab_name: str, row: dict):
 
     # Pega o header atual
     headers = ws.row_values(1)
-    
+
     # Monta a linha respeitando a ordem do header
     payload = [str(row.get(h, "")) for h in headers]
-    
+
     # Adiciona a linha
     try:
         ws.append_row(payload, value_input_option="USER_ENTERED")
