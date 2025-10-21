@@ -23,7 +23,8 @@ def _mes_label(s):
     return s.dt.to_period("M").dt.to_timestamp()
 
 def _fmt_rs(v):
-    if pd.isna(v): return "—"
+    if pd.isna(v): 
+        return "—"
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def _to_date(x):
@@ -45,9 +46,12 @@ def _safe_num(x):
     except Exception:
         return np.nan
 
+def _safestr(x) -> str:
+    """Converte qualquer valor para str sem estourar com pd.NA/NaT."""
+    return "" if pd.isna(x) else str(x)
+
 
 # ----------------------- Main page Feature -----------------------
-
 def page():
     st.caption("Use os filtros ao lado para refinar os indicadores.")
     st.header("📊 Dashboard Operacional — Seção de Vistorias")
@@ -85,7 +89,6 @@ def page():
             "Data da conclusão da VT", "Data da conclusão", "Conclusão da VT", "Conclusão",
             "DATA/PREVISÃO DE CONCLUSÃO"
         ]),
-        # extra: algumas planilhas trazem data de resposta
         "dt_resp": pick_col(df, ["DATA DA RESPOSTA A SOLICITAÇÃO", "Data da resposta"]),
         "orcamento": pick_col(df, ["Orçamento estimado", "Valor estimado", "Custo", "PFR", "Total R$", "Orçamento"]),
     }
@@ -145,21 +148,25 @@ def page():
         stat_sel= st.multiselect("Status", _opts("status"), key="status")
 
     # Aplicação dos filtros
-    mask = pd.Series(True, index=df.index)
+    mask = pd.Series(True, index=df.index, dtype=bool)
 
     if COL["dt_solic"] and COL["dt_solic"] in df.columns:
         datas = pd.to_datetime(df[COL["dt_solic"]], errors="coerce", dayfirst=True)
         no_intervalo = datas.between(
             pd.to_datetime(periodo[0]), pd.to_datetime(periodo[1]), inclusive="both"
         )
-        mask &= (no_intervalo | (datas.isna() & incluir_sem_data))
+        sem_data = datas.isna()
+        if incluir_sem_data:
+            mask &= (no_intervalo | sem_data)
+        else:
+            mask &= no_intervalo.fillna(False)
 
     if om_sel and COL["om"]:
-        mask &= df[COL["om"]].astype(str).isin(om_sel)
+        mask &= df[COL["om"]].astype(str).isin(om_sel).fillna(False)
     if esp_sel and COL["especialidade"]:
-        mask &= df[COL["especialidade"]].astype(str).isin(esp_sel)
+        mask &= df[COL["especialidade"]].astype(str).isin(esp_sel).fillna(False)
     if stat_sel and COL["status"]:
-        mask &= df[COL["status"]].astype(str).isin(stat_sel)
+        mask &= df[COL["status"]].astype(str).isin(stat_sel).fillna(False)
 
     dff = df[mask].copy()
 
@@ -192,19 +199,18 @@ def page():
     def _eh_atendida(row) -> bool:
         textos = []
         if COL["status"]:
-            textos.append(str(row[COL["status"]] or ""))
+            textos.append(_safestr(row.get(COL["status"])))
         if "STATUS - ATUALIZAÇÃO SEMANAL" in dff.columns:
-            textos.append(str(row["STATUS - ATUALIZAÇÃO SEMANAL"] or ""))
+            textos.append(_safestr(row.get("STATUS - ATUALIZAÇÃO SEMANAL")))
         j = " ".join(textos).lower()
 
-        if any(p in j for p in ["finaliz", "conclu", "atendid"]):
+        if any(p in j for p in ("finaliz", "conclu", "atendid")):
             return True
-        if COL["dt_conc"] and pd.notna(row[COL["dt_conc"]]):
+        if COL["dt_conc"] and pd.notna(row.get(COL["dt_conc"], pd.NaT)):
             return True
-        if COL["dt_resp"] and pd.notna(row[COL["dt_resp"]]):
+        if COL["dt_resp"] and pd.notna(row.get(COL["dt_resp"], pd.NaT)):
             return True
-        if COL["dt_real_visita"] and pd.notna(row[COL["dt_real_visita"]]):
-            # se quiser considerar “vistoriada” como atendida
+        if COL["dt_real_visita"] and pd.notna(row.get(COL["dt_real_visita"], pd.NaT)):
             return True
         return False
 
@@ -244,7 +250,8 @@ def page():
 
     # série mensal
     mensal = (
-        dff.groupby("_mes")
+        dff.loc[dff["_mes"].notna()]
+           .groupby("_mes")
            .agg(pedidos=("_pedido", "sum"), atendidas=("_atendida", "sum"))
            .reset_index()
            .sort_values("_mes")
@@ -399,16 +406,6 @@ def page():
                 )
             if "Tempo Execução (dias)" in dff.columns:
                 doc.add_paragraph(f"Prazo Médio de Execução: {dff['Tempo Execução (dias)'].mean():.1f} dias")
-
-            doc.add_heading("Tabela de Vistorias", level=2)
-            t = doc.add_table(rows=1, cols=len(dff.columns))
-            hdr_cells = t.rows[0].cells
-            for j, c in enumerate(dff.columns):
-                hdr_cells[j].text = c
-            for _, row in dff.head(25).iterrows():
-                row_cells = t.add_row().cells
-                for j, c in enumerate(dff.columns):
-                    row_cells[j].text = "" if pd.isna(row[c]) else str(row[c])
 
             import io
             bio = io.BytesIO()
