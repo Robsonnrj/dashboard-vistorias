@@ -1,4 +1,3 @@
-# features/status.py
 from __future__ import annotations
 
 import streamlit as st
@@ -8,6 +7,14 @@ from datetime import date, datetime
 from core.config import TAB_SOLICITACOES, TAB_AUDIT, TAB_VALIDACAO
 from core.data_loader import read_df, overwrite_tab_from_df
 from core.utils import pick_col
+
+# Inicializa tabs_map se não existir
+if "tabs_map" not in st.session_state:
+    st.session_state["tabs_map"] = {
+        "solicitacoes": "ACOMPANHAMENTO VISTORIAS",
+        "validacao":    "Validacao_de_Dados",
+        "auditoria":    "Auditoria_Vistorias",
+    }
 
 URGENCIAS = ["Não Prioridade", "Prioridade", "Urgente"]
 SITUACOES = ["Não Atendida", "Em andamento", "Finalizada"]
