@@ -7,7 +7,26 @@ from core.utils import norm, pick_col
 
 @st.cache_data(ttl=600)
 def _load_oms_validadas() -> pd.DataFrame:
-    df = read_df("Validacao_de_Dados")
+    df_raw = read_df("Validacao_de_Dados")
+    # Detecta onde está o cabeçalho verdadeiro
+    alias_list = [
+        "om", "sigla", "organização militar", "nome", "diretoria responsável", "diretoria"
+    ]
+    # Procura linha onde bate com pelo menos 2 aliases
+    header_idx = None
+    for i, row in enumerate(df_raw.values):
+        hits = sum(
+            any(a in str(cell).lower() for a in alias_list)
+            for cell in row
+        )
+        if hits >= 2:  # pelo menos dois cabeçalhos conhecidos
+            header_idx = i
+            break
+    if header_idx is None:
+        st.error("Não foi possível detectar o cabeçalho de validação na planilha. Verifique os nomes das colunas!")
+        return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
+    # Usa a linha detectada como cabeçalho
+    df = pd.DataFrame(df_raw.values[header_idx+1:], columns=df_raw.values[header_idx])
     col_sigla   = pick_col(df, ["om", "sigla"])
     col_nome    = pick_col(df, ["organização militar", "organizacao militar", "om nome", "nome"])
     col_dir     = pick_col(df, ["diretoria responsável", "diretoria responsavel", "diretoria"])
@@ -16,14 +35,14 @@ def _load_oms_validadas() -> pd.DataFrame:
     if not col_nome: missings.append("Nome da OM")
     if not col_dir: missings.append("Diretoria")
     if missings:
-        st.error(f"Colunas não encontradas na aba de validação: {', '.join(missings)}. Corrija a planilha antes de cadastrar.")
+        st.error(f"Colunas não encontradas na aba de validação: {', '.join(missings)}. Corrija a planilha ou verifique os nomes das colunas.")
         return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
     df_out = df.rename(columns={col_sigla: "om_sigla", col_nome: "om_nome", col_dir: "diretoria"})[["om_sigla", "om_nome", "diretoria"]]
     for c in ["om_sigla", "om_nome", "diretoria"]:
         df_out[c] = df_out[c].astype(str).str.strip()
     df_out = df_out[(df_out["om_sigla"] != "") & (df_out["diretoria"] != "")]
     return df_out.drop_duplicates(subset=["om_sigla", "diretoria"])
-
+    
 def _build_om_options(oms_df: pd.DataFrame):
     if oms_df.empty:
         return ["Outra / não listada…"], {"Outra / não listada…": ""}, {}, {"Outra / não listada…": ""}
