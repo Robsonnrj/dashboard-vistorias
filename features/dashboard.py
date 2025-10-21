@@ -9,6 +9,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from core.data_loader import read_df
@@ -17,7 +18,14 @@ from core.utils import pick_col
 
 
 # ----------------------- Helpers -----------------------
+def _mes_label(s):
+    s = pd.to_datetime(s, errors="coerce")
+    return s.dt.to_period("M").dt.to_timestamp()
 
+def _fmt_rs(v):
+    if pd.isna(v): return "—"
+    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
 def _to_date(x):
     """Converte para Timestamp (brasil: dayfirst=True), devolvendo NaT em erros."""
     if pd.isna(x):
@@ -200,7 +208,123 @@ def page():
     else:
         c4.metric("Prazo Médio de Execução", "—")
 
-    # ----------------------- Visualizações -----------------------
+    # ----------------------- Visualizações no estilo Excel -----------------------
+    st.subheader("📈 Visualizações no estilo Excel")
+    tabs = st.tabs(["Linha", "Colunas / Barras", "Pizza / Rosca", "Radar"])
+
+    # Linha (multi-série por Status)
+    with tabs[0]:
+        if COL["dt_solic"] and COL["status"]:
+            dff["_mes"] = _mes_label(dff[COL["dt_solic"]])
+            base = (
+                dff.groupby(["_mes", COL["status"]])
+                   .size()
+                   .reset_index(name="qtd")
+                   .sort_values("_mes")
+            )
+            fig = px.line(
+                base, x="_mes", y="qtd", color=COL["status"],
+                markers=True, title="Evolução mensal por Status"
+            )
+            fig.update_traces(mode="lines+markers")
+            fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd", legend_title="Status")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Preciso de Data da Solicitação e Status para montar esta linha.")
+
+    # Colunas / Barras
+    with tabs[1]:
+        col_a, col_b = st.columns(2)
+        # Colunas agrupadas por mês e classificação
+        with col_a:
+            if COL["dt_solic"] and "Classificação" in dff.columns:
+                dff["_mes"] = _mes_label(dff[COL["dt_solic"]])
+                base = (
+                    dff.groupby(["_mes", "Classificação"])
+                       .size()
+                       .reset_index(name="qtd")
+                )
+                fig = px.bar(
+                    base, x="_mes", y="qtd", color="Classificação", barmode="group",
+                    title="Colunas — por mês x classificação"
+                )
+                fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Preciso de Data da Solicitação e Classificação.")
+
+        # Barras horizontais Top 10 OMs
+        with col_b:
+            if COL["om"]:
+                top_om = (
+                    dff.groupby(COL["om"]).size().nlargest(10)
+                       .reset_index(name="Qtd")
+                       .sort_values("Qtd")
+                )
+                fig = px.bar(
+                    top_om, x="Qtd", y=COL["om"], orientation="h",
+                    title="Barras — Top 10 OMs por quantidade"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Preciso da coluna OM.")
+
+    # Pizza / Rosca
+    with tabs[2]:
+        col_a, col_b = st.columns(2)
+        # Pizza por Status
+        with col_a:
+            if COL["status"]:
+                fig = px.pie(
+                    dff, names=COL["status"], title="Pizza — participação por Status"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Preciso da coluna Status.")
+        # Rosca por Classificação (em R$ se houver orçamento)
+        with col_b:
+            if "Classificação" in dff.columns and COL["orcamento"]:
+                base = dff.groupby("Classificação")[COL["orcamento"]].sum().reset_index()
+                fig = px.pie(
+                    base, names="Classificação", values=COL["orcamento"],
+                    hole=0.55, title="Rosca — orçamento por classificação"
+                )
+                fig.update_traces(textposition="inside")
+                st.plotly_chart(fig, use_container_width=True)
+            elif "Classificação" in dff.columns:
+                fig = px.pie(dff, names="Classificação", hole=0.55,
+                             title="Rosca — participação por classificação")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Preciso da Classificação (Emergencial/Não).")
+
+    # Radar (categorias em eixo polar)
+    with tabs[3]:
+        eixo = None
+        if COL["especialidade"]:
+            eixo = COL["especialidade"]
+            titulo = "Radar — distribuição por Especialidade"
+        elif COL["status"]:
+            eixo = COL["status"]
+            titulo = "Radar — distribuição por Status"
+        if eixo:
+            base = dff.groupby(eixo).size().reset_index(name="qtd")
+            base = base.sort_values("qtd", ascending=False).head(10)  # mantém legível
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatterpolar(
+                r=base["qtd"], theta=base[eixo], fill="toself", name="Qtd"
+            ))
+            fig.update_layout(
+                title=titulo,
+                polar=dict(radialaxis=dict(visible=True)),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Preciso de Especialidade ou Status para o radar.")
+
+    # ----------------------- Visualizações (as suas originais) -----------------------
     st.subheader("Visualizações Analíticas")
 
     if COL["dt_solic"]:
