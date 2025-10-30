@@ -3,11 +3,12 @@
 Home — CRO/1 Sistema de Vistorias
 Página inicial com menu de ícones
 """
-from core.config import SHEET_TABS
+
 from __future__ import annotations
 import streamlit as st
+from core.config import SHEET_TABS
 
-st.session_state.setdefault("tabs_map", SHEET_TABS.copy())
+
 
 st.set_page_config(
     page_title="CRO/1 — Sistema de Vistorias",
@@ -15,6 +16,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+# Garante o mapeamento das abas(usado pelas features)
+
+st.session_state.setdefault("tabs_map", SHEET_TABS.copy())
 
 st.markdown("""
 <style>
@@ -31,7 +35,7 @@ st.write("")
 def icon(link_path: str, emoji: str, label: str):
     st.markdown("<div class='icon-btn'>", unsafe_allow_html=True)
     if st.button(emoji, help=label, type="secondary", key=label):
-        st.switch_page(link_path)
+        st.switch_page(path)
     st.markdown(f"<div class='icon-caption'>{label}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
