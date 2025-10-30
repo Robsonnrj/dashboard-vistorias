@@ -22,6 +22,28 @@ st.set_page_config(
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
 # =========================================================
+# Router imediato (se veio com ?nav=...)
+# =========================================================
+def _get_nav_param():
+    try:
+        nav = st.query_params.get("nav", None)
+        if isinstance(nav, list):
+            nav = nav[0]
+        return nav
+    except Exception:
+        # compat para versões mais antigas
+        return None
+
+_nav = _get_nav_param()
+if _nav:
+    # limpa o parâmetro e navega
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    st.switch_page(_nav)
+
+# =========================================================
 # Paleta — Azul institucional
 # =========================================================
 PRIMARY_NAVY   = "#0F2A3A"  # faixa/cabeçalho
@@ -124,9 +146,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
+# Listener no PAI: recebe postMessage do iframe e navega no topo
+# =========================================================
+st.markdown("""
+<script>
+window.addEventListener("message", function(ev){
+  try{
+    if(ev && ev.data && ev.data.nav){
+      const dest = ev.data.nav;
+      const qs = new URLSearchParams(window.location.search);
+      qs.set("nav", dest);
+      // navega no topo da janela
+      window.location.search = qs.toString();
+    }
+  }catch(e){}
+}, false);
+</script>
+""", unsafe_allow_html=True)
+
+# =========================================================
 # Definição dos cards (com seus paths reais)
 # =========================================================
-
 cards = [
     {"k":"1","title":"Cadastro de Vistorias","hint":"Criar, editar e validar registros","path":"pages/Cadastro_de_vistorias.py","svg":"""
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 7h7l2 2h9v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="white" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -145,53 +185,50 @@ cards = [
     """},
 ]
 
-ACCENT_BLUE    = "#1E40AF"
-ACCENT_BLUE_LT = "#E8F0FF"
-PRIMARY_NAVY   = "#0F2A3A"
-TEXT_MUTED     = "#64748B"
-CARD_BORDER    = "#E8EEF5"
-
-cards_html = """
+# =========================================================
+# HTML dos cards (iframe) — com target="_top" + postMessage
+# =========================================================
+cards_html = f"""
 <style>
-.menu-grid{
+.menu-grid{{
   display:grid; grid-template-columns:repeat(5,minmax(220px,1fr)); gap:28px; margin-top:22px;
-}
-.menu-card{
-  position:relative; background:#fff; border:1.5px solid %(CARD_BORDER)s;
+}}
+.menu-card{{
+  position:relative; background:#fff; border:1.5px solid {CARD_BORDER};
   border-radius:20px; padding:26px 22px 74px; text-decoration:none;
   box-shadow:0 10px 30px rgba(15,42,58,.08);
   transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease;
   display:block; color:inherit;
-}
-.menu-card:hover{ transform:translateY(-2px); border-color:#D7E3F5; box-shadow:0 16px 36px rgba(30,64,175,.16); }
-.icon-circle{
-  width:68px; height:68px; border-radius:50%%; background:%(ACCENT_BLUE)s; display:grid; place-items:center;
+}}
+.menu-card:hover{{ transform:translateY(-2px); border-color:#D7E3F5; box-shadow:0 16px 36px rgba(30,64,175,.16); }}
+.icon-circle{{
+  width:68px; height:68px; border-radius:50%; background:{ACCENT_BLUE}; display:grid; place-items:center;
   margin:2px auto 12px; box-shadow:0 6px 16px rgba(30,64,175,.30);
-}
-.menu-card h3{ color:%(PRIMARY_NAVY)s; font-size:20px; line-height:1.25; text-align:center; margin:6px 0 8px; }
-.menu-card .hint{ color:%(TEXT_MUTED)s; text-align:center; font-size:14px; min-height:42px; }
-.menu-card .chip{
-  position:absolute; left:50%%; transform:translateX(-50%%); bottom:18px;
-  background:%(ACCENT_BLUE_LT)s; border:1px solid #C9DAFF; color:%(ACCENT_BLUE)s;
+}}
+.menu-card h3{{ color:{PRIMARY_NAVY}; font-size:20px; line-height:1.25; text-align:center; margin:6px 0 8px; }}
+.menu-card .hint{{ color:{TEXT_MUTED}; text-align:center; font-size:14px; min-height:42px; }}
+.menu-card .chip{{
+  position:absolute; left:50%; transform:translateX(-50%); bottom:18px;
+  background:{ACCENT_BLUE_LT}; border:1px solid #C9DAFF; color:{ACCENT_BLUE};
   padding:6px 18px; border-radius:20px; font-weight:600; font-size:14px;
-}
-@media (max-width:1400px){ .menu-grid{grid-template-columns:repeat(4,1fr);} }
-@media (max-width:1100px){ .menu-grid{grid-template-columns:repeat(3,1fr);} }
-@media (max-width:800px){ .menu-grid{grid-template-columns:repeat(2,1fr);} }
-@media (max-width:520px){ .menu-grid{grid-template-columns:1fr;} }
+}}
+@media (max-width:1400px){{ .menu-grid{{grid-template-columns:repeat(4,1fr);} }}}
+@media (max-width:1100px){{ .menu-grid{{grid-template-columns:repeat(3,1fr);} }}}
+@media (max-width:800px){{ .menu-grid{{grid-template-columns:repeat(2,1fr);} }}}
+@media (max-width:520px){{ .menu-grid{{grid-template-columns:1fr;} }}}
 </style>
 <div class="menu-grid">
-""" % {
-    "ACCENT_BLUE": ACCENT_BLUE,
-    "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
-    "PRIMARY_NAVY": PRIMARY_NAVY,
-    "TEXT_MUTED": TEXT_MUTED,
-    "CARD_BORDER": CARD_BORDER,
-}
+"""
 
 for c in cards:
     cards_html += f"""
-    <a class="menu-card" href="?nav={c['path']}" id="card-{c['k']}" aria-label="{c['title']}">
+    <a class="menu-card"
+       href="?nav={c['path']}"
+       id="card-{c['k']}"
+       aria-label="{c['title']}"
+       target="_top"
+       onclick="try{{ parent.postMessage({{nav: '{c['path']}'}}, '*'); }}catch(e){{}}"
+    >
       <div class="icon-circle">{c['svg']}</div>
       <h3>{c['title']}</h3>
       <div class="hint">{c['hint']}</div>
@@ -209,6 +246,9 @@ document.addEventListener('keydown', function(e){
 </script>
 """
 
-# Renderiza os cards em um iframe (não escapa o HTML)
 components.html(cards_html, height=560, scrolling=False)
-# ===== FIM DO TRECHO SUBSTITUÍDO =====
+
+# =========================================================
+# Rodapé
+# =========================================================
+st.caption("Dica: use as teclas **1–5** para abrir as seções rapidamente.")
