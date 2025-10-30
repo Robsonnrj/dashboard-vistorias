@@ -1,30 +1,28 @@
-# -*- coding: utf-8 -*-
-"""
-Home — CRO/1 Sistema de Vistorias
-Página inicial com menu de ícones
-"""
-
 from __future__ import annotations
 import streamlit as st
-from core.config import SHEET_TABS
-
-
+try:
+    from core.config import SHEET_TABS  # type: ignore
+except Exception:
+    SHEET_TABS = {
+        "solicitacoes": "Solicitacoes",
+        "historicos":   "Historicos",
+        "relatorios":   "Relatorios",
+    }
 
 st.set_page_config(
     page_title="CRO/1 — Sistema de Vistorias",
     page_icon="🏠",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
-# Garante o mapeamento das abas(usado pelas features)
 
-st.session_state.setdefault("tabs_map", SHEET_TABS.copy())
+st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
 st.markdown("""
 <style>
-.block-container { padding-top: 2rem; padding-bottom: 3rem; text-align:center; }
-.icon-btn button[kind="secondary"]{height:120px;width:120px;font-size:60px;border-radius:24px;}
-.icon-caption{margin-top:8px;font-weight:600;font-size:.95rem;text-align:center;}
+.block-container{padding-top:2rem;padding-bottom:3rem;text-align:center}
+.icon-btn button[kind="secondary"]{height:120px;width:120px;font-size:60px;border-radius:24px}
+.icon-caption{margin-top:8px;font-weight:600;font-size:.95rem;text-align:center}
 </style>
 """, unsafe_allow_html=True)
 
@@ -32,7 +30,7 @@ st.markdown("<h1>Navegação</h1>", unsafe_allow_html=True)
 st.write("Clique em um ícone para abrir a seção")
 st.write("")
 
-def icon(link_path: str, emoji: str, label: str):
+def icon(path, emoji, label):
     st.markdown("<div class='icon-btn'>", unsafe_allow_html=True)
     if st.button(emoji, help=label, type="secondary", key=label):
         st.switch_page(path)
