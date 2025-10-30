@@ -33,7 +33,7 @@ def _load_oms_validadas() -> pd.DataFrame:
     Lê a aba 'Validacao_de_Dados' e retorna colunas: om_sigla, om_nome, diretoria
     """
     # seus títulos estão na 1ª linha
-    df = read_df("Validacao_de_Dados", header=0)
+    df = read_df("Validacao_de_Dados")
 
     col_sigla = _find_col(df, "om", "sigla")
     col_nome  = _find_col(df, "organização militar", "organizacao militar", "om nome", "nome")
