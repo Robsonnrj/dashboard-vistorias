@@ -142,7 +142,7 @@ st.markdown("""
 # Lista de Cards
 # =========================================================
 # =========================================================
-# Lista de Cards (sem JS — 100% Streamlit)
+# Lista de Cards
 # =========================================================
 cards = [
     {"k":"1","title":"Cadastro de Vistorias","icon":"🗂️","hint":"Criar, editar e validar registros","path":"pages/Cadastro_de_vistorias.py"},
@@ -153,38 +153,82 @@ cards = [
 ]
 
 # =========================================================
-# Cards estilizados (com botões reais)
+# Cards estilizados lado a lado (5 por linha)
 # =========================================================
-st.markdown('<div id="cards-grid">', unsafe_allow_html=True)
-
-clicked_path = None
-for c in cards:
-    card_html = f"""
-    <div style="
-        border:1.5px solid {CARD_BORDER};
-        border-radius:20px;
-        background:white;
-        padding:26px 22px 30px 22px;
-        box-shadow:0 10px 30px rgba(15,42,58,0.08);
-        text-align:center;
-        transition:all .2s ease;">
-        <div style="display:inline-grid;place-items:center;
-                    width:68px;height:68px;border-radius:50%;
-                    background:{ACCENT_BLUE};color:white;font-size:30px;
-                    box-shadow:0 6px 16px rgba(30,64,175,.30);
-                    margin:2px auto 10px auto;">{c['icon']}</div>
-        <h3 style="color:{PRIMARY_NAVY};font-size:20px;margin:6px 0 8px 0;">{c['title']}</h3>
-        <div style="color:{TEXT_MUTED};font-size:14px;min-height:42px;">{c['hint']}</div>
+st.markdown(
     """
-    st.markdown(card_html, unsafe_allow_html=True)
-    if st.button("Abrir", key=f"card-{c['k']}", use_container_width=True):
-        clicked_path = c["path"]
-    st.markdown("</div>", unsafe_allow_html=True)
+    <style>
+    .card-box {
+        background: white;
+        border: 1.5px solid #E8EEF5;
+        border-radius: 20px;
+        padding: 26px 22px 28px 22px;
+        box-shadow: 0 10px 30px rgba(15,42,58,0.08);
+        text-align: center;
+        transition: all .2s ease;
+    }
+    .card-box:hover {
+        transform: translateY(-3px);
+        border-color: #D7E3F5;
+        box-shadow: 0 16px 36px rgba(30,64,175,.16);
+    }
+    .card-ico {
+        display: inline-grid;
+        place-items: center;
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        background: #1E40AF;
+        color: white;
+        font-size: 30px;
+        box-shadow: 0 6px 16px rgba(30,64,175,.30);
+        margin: 0 auto 10px auto;
+    }
+    .card-title { color: #0F2A3A; font-size: 20px; margin: 6px 0 8px 0; font-weight: 700; }
+    .card-hint { color: #64748B; font-size: 14px; min-height: 42px; margin-bottom: 10px; }
+    .stButton>button {
+        border: 1px solid #C9DAFF;
+        background: #E8F0FF;
+        color: #1E40AF;
+        font-weight: 600;
+        border-radius: 20px;
+        padding: 6px 18px;
+        transition: all .2s ease;
+    }
+    .stButton>button:hover {
+        background: #D7E3F5;
+        color: #0F2A3A;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
-st.markdown('</div>', unsafe_allow_html=True)
+# Define grid responsivo (5 colunas)
+cols_per_row = 5
+clicked_path = None
+
+for i in range(0, len(cards), cols_per_row):
+    cols = st.columns(cols_per_row)
+    for col, c in zip(cols, cards[i:i + cols_per_row]):
+        with col:
+            st.markdown(
+                f"""
+                <div class="card-box">
+                    <div class="card-ico">{c['icon']}</div>
+                    <div class="card-title">{c['title']}</div>
+                    <div class="card-hint">{c['hint']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            if st.button("Abrir", key=f"card-{c['k']}", use_container_width=True):
+                clicked_path = c["path"]
 
 # =========================================================
-# Se clicou → muda de página localmente (sem abrir aba)
+# Redirecionamento se clicou
 # =========================================================
 if clicked_path:
     st.switch_page(clicked_path)
+
+st.caption("Dica: use as teclas **1–5** para abrir as seções rapidamente.")
