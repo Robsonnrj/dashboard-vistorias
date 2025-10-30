@@ -1,12 +1,10 @@
 from __future__ import annotations
 import streamlit as st
-from core.config import SHEET_TABS
+try:
+    from core.config import SHEET_TABS  # type: ignore
+except Exception:
+    SHEET_TABS = {"solicitacoes":"Solicitacoes","historicos":"Historicos","relatorios":"Relatorios"}
+st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
+
 from core import audit
-
-st.session_state.setdefault("tabs_map", SHEET_TABS.copy())
-
-fn = getattr(audit, "page", getattr(audit, "main", getattr(audit, "app", None)))
-if callable(fn):
-    fn()
-else:
-    st.error("A página de Auditoria não expõe page()/main()/app().")
+(getattr(audit, "page", getattr(audit, "main", getattr(audit, "app", None))))()
