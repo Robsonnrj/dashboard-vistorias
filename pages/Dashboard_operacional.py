@@ -1,8 +1,10 @@
 from __future__ import annotations
 import streamlit as st
-from core.config import SHEET_TABS
+try:
+    from core.config import SHEET_TABS  # type: ignore
+except Exception:
+    SHEET_TABS = {"solicitacoes":"Solicitacoes","historicos":"Historicos","relatorios":"Relatorios"}
+st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
+
 from features import dashboard
-
-st.session_state.setdefault("tabs_map", SHEET_TABS.copy())
-
 dashboard.page()
