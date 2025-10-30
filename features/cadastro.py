@@ -1,72 +1,103 @@
-# features/cadastro.py
 # -*- coding: utf-8 -*-
 import streamlit as st
 from datetime import datetime
 import pandas as pd
 
 from core.data_loader import append_row, read_df
+from core.utils import norm, pick_col
 
-# -------------------------------
-# Helpers p/ detectar colunas pelo nome
-# -------------------------------
-def _norm(s: str) -> str:
-    return str(s).strip().lower()
 
-def _find_col(df: pd.DataFrame, *cands: str) -> str:
-    cols = { _norm(c): c for c in df.columns }
-    for c in cands:
-        k = _norm(c)
-        if k in cols: 
-            return cols[k]
-    # fallback: tenta por "contém"
-    for want in cands:
-        for k, orig in cols.items():
-            if _norm(want) in k:
-                return orig
-    raise KeyError(f"Não achei colunas {cands} em {list(df.columns)}")
+def _N(x: str) -> str:
+    """Normaliza string: strip + upper (para siglas/chaves)."""
+    return (str(x or "")).strip().upper()
 
-# -------------------------------
-# Carrega OMs e diretorias diretamente da aba de validação
-# -------------------------------
+
+@st.cache_data(ttl=600)
 def _load_oms_validadas() -> pd.DataFrame:
     """
-    Lê a aba 'Validacao_de_Dados' e retorna colunas: om_sigla, om_nome, diretoria
+    Lê a aba 'Validacao_de_Dados' já tratada pelo read_df e mapeia as colunas por sinônimos.
+    Retorna um DF com colunas: om_sigla, om_nome, diretoria (todas sem espaços extras).
     """
-    # seus títulos estão na 1ª linha
-    df = read_df("Validacao_de_Dados")
+    df = read_df("Validacao_de_Dados", use_cache=False)
+    if df is None or df.empty:
+        st.error("Base de validação vazia ou não encontrada.")
+        return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
 
-    col_sigla = _find_col(df, "om", "sigla")
-    col_nome  = _find_col(df, "organização militar", "organizacao militar", "om nome", "nome")
-    col_dir   = _find_col(df, "diretoria responsável", "diretoria responsavel", "diretoria")
+    col_sigla = pick_col(df, [
+        "sigla", "sigla om", "om (sigla)", "sigla da om", "om sigla", "sigla/om",
+        "om", "om solicitante (sigla)"
+    ])
+    col_nome = pick_col(df, [
+        "organização militar", "organizacao militar", "om nome", "nome da om",
+        "nome", "unidade/om", "unidade", "om solicitante (nome)"
+    ])
+    col_dir = pick_col(df, [
+        "diretoria responsável", "diretoria responsavel", "diretoria",
+        "dir responsável", "dir responsavel", "direção", "diretoria/om"
+    ])
 
-    out = df.rename(columns={
-        col_sigla: "om_sigla",
-        col_nome : "om_nome",
-        col_dir  : "diretoria",
-    })[["om_sigla", "om_nome", "diretoria"]].copy()
+    missings = []
+    if not col_sigla: missings.append("OM/Sigla")
+    if not col_nome:  missings.append("Nome da OM")
+    if not col_dir:   missings.append("Diretoria")
+    if missings:
+        with st.expander("🔎 Diagnóstico — colunas disponíveis na aba de validação"):
+            st.write(list(df.columns))
+        st.error(
+            "Colunas não encontradas na aba de validação: "
+            + ", ".join(missings)
+            + ". Corrija a planilha ou verifique os nomes das colunas."
+        )
+        return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
 
+    df_out = (
+        df.rename(columns={col_sigla: "om_sigla", col_nome: "om_nome", col_dir: "diretoria"})
+          [["om_sigla", "om_nome", "diretoria"]]
+          .copy()
+    )
+    # limpeza e normalização
     for c in ["om_sigla", "om_nome", "diretoria"]:
-        out[c] = out[c].astype(str).str.strip()
+        df_out[c] = df_out[c].astype(str).str.strip()
+    # remove linhas vazias
+    df_out = df_out[(df_out["om_sigla"] != "") & (df_out["diretoria"] != "")]
+    # normaliza sigla para UPPER para chaves consistentes
+    df_out["om_sigla_norm"] = df_out["om_sigla"].map(_N)
+    # remove duplicados por sigla normalizada
+    df_out = df_out.drop_duplicates(subset=["om_sigla_norm"], keep="first").reset_index(drop=True)
 
-    out = out[(out["om_sigla"] != "") & (out["diretoria"] != "")]
-    out = out.drop_duplicates(subset=["om_sigla", "diretoria"])
-    return out
+    # diagnóstico opcional
+    with st.expander("🧭 Mapeamento detectado na validação"):
+        st.write(f"OMs válidas: {len(df_out)}")
+        st.write(df_out.head(10))
+
+    return df_out[["om_sigla", "om_nome", "diretoria", "om_sigla_norm"]]
+
 
 def _build_om_options(oms_df: pd.DataFrame):
+    """
+    Monta:
+      - options_display: lista para o select (ex.: 'IME — Instituto Militar de Engenharia')
+      - disp_to_sigla:   display -> SIGLA (original)
+      - sigla_to_dir:    SIGLA_NORMALIZADA -> Diretoria
+      - disp_to_dir:     display -> Diretoria
+    """
+    if oms_df.empty:
+        return ["Outra / não listada…"], {"Outra / não listada…": ""}, {}, {"Outra / não listada…": ""}
+
     options_display, disp_to_sigla, sigla_to_dir, disp_to_dir = [], {}, {}, {}
-
     for _, r in oms_df.iterrows():
-        sig  = str(r["om_sigla"]).strip()
-        nom  = str(r["om_nome"]).strip()
-        dire = str(r["diretoria"]).strip()
+        sigla = (r["om_sigla"] or "").strip()
+        sigla_norm = _N(sigla)
+        nome = (r["om_nome"] or "").strip()
+        diretoria = (r["diretoria"] or "").strip()
 
-        display = f"{sig} — {nom}" if nom else sig
+        display = f"{sigla} — {nome}" if nome else sigla
         options_display.append(display)
+        disp_to_sigla[display] = sigla
+        sigla_to_dir[sigla_norm] = diretoria
+        disp_to_dir[display] = diretoria
 
-        disp_to_sigla[display] = sig
-        sigla_to_dir[sig] = dire
-        disp_to_dir[display] = dire   # <- chave: display
-
+    # opção manual
     options_display.append("Outra / não listada…")
     disp_to_sigla["Outra / não listada…"] = ""
     disp_to_dir["Outra / não listada…"] = ""
@@ -74,58 +105,33 @@ def _build_om_options(oms_df: pd.DataFrame):
     return options_display, disp_to_sigla, sigla_to_dir, disp_to_dir
 
 
-def _on_om_change(disp2sig: dict, sig2dir: dict):
-    choice = st.session_state.get("om_choice")
-    sig = disp2sig.get(choice or "", "")
-    st.session_state["om_sigla_out"] = ""
-    st.session_state["diretoria_manual"] = ""
-    st.session_state["diretoria_auto"] = sig2dir.get(sig, "")
-
 def _input_row():
     st.subheader("📥 Nova solicitação de vistoria")
+
     oms_df = _load_oms_validadas()
     options, disp2sig, sig2dir, disp2dir = _build_om_options(oms_df)
     st.caption(f"{len(oms_df)} Organizações Militares carregadas da base de validação")
 
-    # garante chave no estado
-    st.session_state.setdefault("diretoria_auto", "")
-
     col1, col2 = st.columns(2)
 
     with col1:
-        # 1) Select da OM
         om_display = st.selectbox(
             "OM solicitante (sigla) *",
             options=options,
-            index=None,
-            placeholder="Selecione ou digite…",
             key="om_choice",
+            placeholder="Selecione ou digite…"
         )
-        om_sigla = disp2sig.get(om_display or "", "")
 
-        # 2) Diretoria: automática se OM conhecida; manual se "Outra…"
+        # OM e diretoria derivadas da seleção (determinístico)
         if om_display == "Outra / não listada…":
             om_sigla = st.text_input("Sigla da OM (manual)", key="om_sigla_out")
             diretoria = st.text_input("Diretoria responsável (manual)", key="diretoria_manual")
-            st.session_state["diretoria_auto"] = ""
         else:
-            # prioridade: mapeamento direto pelo DISPLAY
-            default_dir = disp2dir.get(om_display or "", "")
-
-            # fallback: se por algum motivo não vier, tenta pela SIGLA
-            if not default_dir:
-                default_dir = sig2dir.get(om_sigla or "", "")
-
-            # força o valor correto em TODO rerun
-            st.session_state["diretoria_auto"] = default_dir
-
-            st.text_input(
-                "Diretoria responsável *",
-                key="diretoria_auto",
-                value=st.session_state.get("diretoria_auto", ""),
-                disabled=True
-            )
-            diretoria = st.session_state["diretoria_auto"]
+            om_sigla = disp2sig.get(om_display, "")
+            diretoria = disp2dir.get(om_display) or sig2dir.get(_N(om_sigla), "")
+            # atualiza sessão e mostra campo somente-leitura que sempre reflete a seleção
+            st.session_state["diretoria_view"] = diretoria
+            st.text_input("Diretoria responsável *", key="diretoria_view", disabled=True)
 
         tipo_vistoria = st.selectbox(
             "Tipo de vistoria *",
@@ -135,21 +141,44 @@ def _input_row():
 
     with col2:
         local = st.text_input("Local / instalação *")
-        urgencia = st.selectbox("Urgência *", ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"], index=0)
+        urgencia = st.selectbox(
+            "Urgência *",
+            ["NÃO PRIORITÁRIO", "PRIORIDADE", "URGENTE"],
+            index=0
+        )
         data_limite = st.date_input("Data limite (opcional)", value=None)
 
     motivo = st.text_area("Motivo / justificativa (NAOM) *", height=120)
 
-    # validação
+    # Campos complementares opcionais
+    with st.expander("📋 Campos Complementares (opcional)", expanded=False):
+        referencia_opus = st.text_input("REFERÊNCIA OPUS")
+        objetivo_contato = st.text_input("OBJETIVO (ADICIONAR POSSÍVEL CONTATO)")
+        vt_exec_por = st.text_input("VT EXECUTADA POR")
+        status_atual = st.text_input("STATUS - ATUALIZAÇÃO SEMANAL")
+        obs = st.text_area("OBSERVAÇÕES", height=90)
+        data_vistoria = st.date_input("DATA DA VISTORIA", value=None)
+        data_prev_conc = st.date_input("DATA/PREVISÃO DE CONCLUSÃO", value=None)
+        meio_resposta = st.text_input("MEIO DE RESPOSTA DA SOLICITAÇÃO")
+        data_resposta = st.date_input("DATA DA RESPOSTA A SOLICITAÇÃO", value=None)
+        num_opus = st.text_input("Nº OPUS DA VISTORIA (SE FOR O CASO)")
+        qd_total = st.number_input("QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO", min_value=0, step=1, value=0)
+        qd_exec = st.number_input("QUANTIDADE DE DIAS PARA EXECUÇÃO", min_value=0, step=1, value=0)
+
+    # Validações
     erros = []
-    if not (om_sigla or "").strip():
-        erros.append("Informe a **OM**.")
     if om_display == "Outra / não listada…":
+        if not (om_sigla or "").strip():
+            erros.append("Informe a **OM**.")
         if not (diretoria or "").strip():
             erros.append("Informe a **diretoria** (manual).")
     else:
+        if not (om_sigla or "").strip():
+            erros.append("Informe a **OM**.")
+        # diretoria vem do dicionário; garante
         if not (diretoria or "").strip():
             erros.append("Diretoria não encontrada para a OM selecionada.")
+
     if not (local or "").strip():
         erros.append("Informe o **local/instalação**.")
     if not (motivo or "").strip():
@@ -158,6 +187,7 @@ def _input_row():
     if erros:
         st.warning("Campos obrigatórios não preenchidos:\n\n• " + "\n• ".join(erros))
 
+    # linhas finais (usa diretoria mapeada automaticamente quando não for manual)
     row = {
         "numero": "",
         "data_solicitacao": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -169,38 +199,61 @@ def _input_row():
         "data_limite": data_limite.strftime("%Y-%m-%d") if data_limite else "",
         "motivo": (motivo or "").strip(),
         "status_atual": "SOLICITADA",
+        "REFERÊNCIA OPUS": (referencia_opus or "").strip(),
+        "OBJETIVO (ADICIONAR POSSÍVEL CONTATO)": (objetivo_contato or "").strip(),
+        "VT EXECUTADA POR": (vt_exec_por or "").strip(),
+        "STATUS - ATUALIZAÇÃO SEMANAL": (status_atual or "").strip(),
+        "DATA DA VISTORIA": data_vistoria.strftime("%Y-%m-%d") if data_vistoria else "",
+        "DATA/PREVISÃO DE CONCLUSÃO": data_prev_conc.strftime("%Y-%m-%d") if data_prev_conc else "",
+        "MEIO DE RESPOSTA DA SOLICITAÇÃO": (meio_resposta or "").strip(),
+        "DATA DA RESPOSTA A SOLICITAÇÃO": data_resposta.strftime("%Y-%m-%d") if data_resposta else "",
+        "Nº OPUS DA VISTORIA (SE FOR O CASO)": (num_opus or "").strip(),
+        "QUANTIDADE DE DIAS PARA TOTAL ATENDIMENTO": str(int(qd_total)) if qd_total else "",
+        "QUANTIDADE DE DIAS PARA EXECUÇÃO": str(int(qd_exec)) if qd_exec else "",
+        "OBSERVAÇÕES": (obs or "").strip(),
     }
     return row, (len(erros) == 0)
 
+
 def page():
+    if "tabs_map" not in st.session_state:
+        st.session_state["tabs_map"] = {
+            "solicitacoes": "ACOMPANHAMENTO VISTORIAS",
+            "validacao":    "Validacao_de_Dados",
+            "auditoria":    "Auditoria_Vistorias",
+        }
+
     st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
+
     tabs_map = st.session_state.get("tabs_map", {})
     tab_solic = tabs_map.get("solicitacoes", "ACOMPANHAMENTO VISTORIAS")
+
     try:
-        df_existente = read_df(tab_solic)
+        df_existente = read_df(tab_solic, use_cache=False)
     except Exception:
         df_existente = pd.DataFrame()
+
     row, ok = _input_row()
-    if st.button("💾 Salvar solicitação", type="primary", disabled=not ok):
-        try:
-            proximo = 1
-            if not df_existente.empty and "numero" in df_existente.columns:
-                nums = pd.to_numeric(df_existente["numero"], errors="coerce").dropna()
-                if not nums.empty:
-                    proximo = int(nums.max()) + 1
-            row["numero"] = str(proximo)
-            append_row(tab_solic, row)
-            st.success(f"Solicitação **#{row['numero']}** cadastrada com sucesso!")
+
+    col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
+
+    with col_btn1:
+        if st.button("💾 Salvar Solicitação", type="primary", disabled=not ok, use_container_width=True):
+            try:
+                proximo = 1
+                if not df_existente.empty and "numero" in df_existente.columns:
+                    nums = pd.to_numeric(df_existente["numero"], errors="coerce").dropna()
+                    if not nums.empty:
+                        proximo = int(nums.max()) + 1
+
+                row["numero"] = str(proximo)
+                append_row(tab_solic, row)
+                st.success(f"Solicitação **#{row['numero']}** cadastrada com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Falha ao salvar: {e}")
+
+    with col_btn2:
+        if st.button("🧹 Limpar Formulário", use_container_width=True):
+            st.session_state.clear()
             st.rerun()
-        except Exception as e:
-            st.error(f"Falha ao salvar: {e}")
-    st.divider()
-    st.subheader("📄 Últimas solicitações")
-    if not df_existente.empty:
-        c_data = next((c for c in df_existente.columns if "data" in c.lower()), None)
-        if c_data:
-            df_existente[c_data] = pd.to_datetime(df_existente[c_data], errors="coerce")
-            df_existente = df_existente.sort_values(c_data, ascending=False)
-        st.dataframe(df_existente.head(50), use_container_width=True, height=360)
-    else:
-        st.caption("Ainda não há registros.")
