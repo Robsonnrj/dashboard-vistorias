@@ -187,38 +187,49 @@ cards = [
 
 # =========================================================
 # HTML dos cards (iframe) — com target="_top" + postMessage
+# (USANDO % FORMAT ao invés de f-string, para não conflitar com {})
 # =========================================================
-cards_html = f"""
+PALETTE = {
+    "CARD_BORDER": CARD_BORDER,
+    "ACCENT_BLUE": ACCENT_BLUE,
+    "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
+    "PRIMARY_NAVY": PRIMARY_NAVY,
+    "TEXT_MUTED": TEXT_MUTED,
+}
+
+cards_html = """
 <style>
-.menu-grid{{
+.menu-grid{
   display:grid; grid-template-columns:repeat(5,minmax(220px,1fr)); gap:28px; margin-top:22px;
-}}
-.menu-card{{
-  position:relative; background:#fff; border:1.5px solid {CARD_BORDER};
+}
+.menu-card{
+  position:relative; background:#fff; border:1.5px solid %(CARD_BORDER)s;
   border-radius:20px; padding:26px 22px 74px; text-decoration:none;
   box-shadow:0 10px 30px rgba(15,42,58,.08);
   transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease;
   display:block; color:inherit;
-}}
-.menu-card:hover{{ transform:translateY(-2px); border-color:#D7E3F5; box-shadow:0 16px 36px rgba(30,64,175,.16); }}
-.icon-circle{{
-  width:68px; height:68px; border-radius:50%; background:{ACCENT_BLUE}; display:grid; place-items:center;
+}
+.menu-card:hover{ transform:translateY(-2px); border-color:#D7E3F5; box-shadow:0 16px 36px rgba(30,64,175,.16); }
+.icon-circle{
+  width:68px; height:68px; border-radius:50%%; background:%(ACCENT_BLUE)s; display:grid; place-items:center;
   margin:2px auto 12px; box-shadow:0 6px 16px rgba(30,64,175,.30);
-}}
-.menu-card h3{{ color:{PRIMARY_NAVY}; font-size:20px; line-height:1.25; text-align:center; margin:6px 0 8px; }}
-.menu-card .hint{{ color:{TEXT_MUTED}; text-align:center; font-size:14px; min-height:42px; }}
-.menu-card .chip{{
-  position:absolute; left:50%; transform:translateX(-50%); bottom:18px;
-  background:{ACCENT_BLUE_LT}; border:1px solid #C9DAFF; color:{ACCENT_BLUE};
+}
+.menu-card h3{ color:%(PRIMARY_NAVY)s; font-size:20px; line-height:1.25; text-align:center; margin:6px 0 8px; }
+.menu-card .hint{ color:%(TEXT_MUTED)s; text-align:center; font-size:14px; min-height:42px; }
+.menu-card .chip{
+  position:absolute; left:50%%; transform:translateX(-50%%); bottom:18px;
+  background:%(ACCENT_BLUE_LT)s; border:1px solid #C9DAFF; color:%(ACCENT_BLUE)s;
   padding:6px 18px; border-radius:20px; font-weight:600; font-size:14px;
-}}
-@media (max-width:1400px){{ .menu-grid{{grid-template-columns:repeat(4,1fr);} }}}
-@media (max-width:1100px){{ .menu-grid{{grid-template-columns:repeat(3,1fr);} }}}
-@media (max-width:800px){{ .menu-grid{{grid-template-columns:repeat(2,1fr);} }}}
-@media (max-width:520px){{ .menu-grid{{grid-template-columns:1fr;} }}}
+}
+
+/* responsivo */
+@media (max-width:1400px){ .menu-grid{grid-template-columns:repeat(4,1fr);} }
+@media (max-width:1100px){ .menu-grid{grid-template-columns:repeat(3,1fr);} }
+@media (max-width:800px){ .menu-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:520px){ .menu-grid{grid-template-columns:1fr;} }
 </style>
 <div class="menu-grid">
-"""
+""" % PALETTE
 
 for c in cards:
     cards_html += f"""
@@ -245,8 +256,8 @@ document.addEventListener('keydown', function(e){
 });
 </script>
 """
-
 components.html(cards_html, height=560, scrolling=False)
+
 
 # =========================================================
 # Rodapé
