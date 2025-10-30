@@ -3,9 +3,11 @@
 Home — CRO/1 Sistema de Vistorias
 Página inicial com menu de ícones
 """
-
+from core.config import SHEET_TABS
 from __future__ import annotations
 import streamlit as st
+
+st.session_state.setdefault("tabs_map", SHEET_TABS.copy())
 
 st.set_page_config(
     page_title="CRO/1 — Sistema de Vistorias",
