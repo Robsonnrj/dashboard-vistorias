@@ -1,4 +1,5 @@
 from __future__ import annotations
+from string import Template
 import streamlit as st
 
 try:
@@ -43,20 +44,20 @@ PALETTE = {
     "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
 }
 
-st.markdown("""
+_css_tpl = Template("""
 <style>
 /* Fundo */
 [data-testid="stAppViewContainer"] {
-  background: %(BG)s;
+  background: $BG;
 }
 .block-container {padding-top:2.2rem; padding-bottom:3rem;}
 
 /* Cabeçalho */
-h1.page-title { color:%(PRIMARY_NAVY)s; margin:0; }
-.page-sub { color:%(TEXT_MUTED)s; font-size:18px; margin-top:6px; }
+h1.page-title { color:$PRIMARY_NAVY; margin:0; }
+.page-sub { color:$TEXT_MUTED; font-size:18px; margin-top:6px; }
 .header-strip {
   position:absolute; right:60px; top:86px;
-  background:%(PRIMARY_NAVY)s; color:#E6F2EA;
+  background:$PRIMARY_NAVY; color:#E6F2EA;
   padding:10px 20px; border-radius:12px; font-size:14px; letter-spacing:.2px;
 }
 .hr { height:2px; background:#E6ECF2; margin:20px 0 10px; border-radius:2px; }
@@ -68,8 +69,8 @@ h1.page-title { color:%(PRIMARY_NAVY)s; margin:0; }
 }
 #cards-grid .stButton > button {
   width:100%; height:220px; text-align:center;
-  border-radius:20px; border:1.5px solid %(CARD_BORDER)s;
-  background:#FFFFFF; color:%(PRIMARY_NAVY)s;
+  border-radius:20px; border:1.5px solid $CARD_BORDER;
+  background:#FFFFFF; color:$PRIMARY_NAVY;
   box-shadow:0 10px 30px rgba(15,42,58,.08);
   transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease;
   padding:18px 16px;
@@ -87,16 +88,16 @@ h1.page-title { color:%(PRIMARY_NAVY)s; margin:0; }
 /* Ícone circular */
 .card-ico {
   display:inline-grid; place-items:center;
-  width:68px; height:68px; border-radius:50%%;
-  background:%(ACCENT_BLUE)s; color:#fff; font-size:30px;
+  width:68px; height:68px; border-radius:50%;
+  background:$ACCENT_BLUE; color:#fff; font-size:30px;
   box-shadow:0 6px 16px rgba(30,64,175,.30);
   margin:2px auto 10px auto;
 }
 
 /* Subtexto e Chip */
-.card-hint { display:block; margin-top:6px; color:%(TEXT_MUTED)s; font-weight:400; font-size:14px; }
+.card-hint { display:block; margin-top:6px; color:$TEXT_MUTED; font-weight:400; font-size:14px; }
 .card-chip  { display:inline-block; margin-top:14px; padding:6px 18px; border-radius:20px;
-              background:%(ACCENT_BLUE_LT)s; color:%(ACCENT_BLUE)s; border:1px solid #C9DAFF;
+              background:$ACCENT_BLUE_LT; color:$ACCENT_BLUE; border:1px solid #C9DAFF;
               font-size:14px; font-weight:600; letter-spacing:.2px; }
 
 /* Responsivo */
@@ -105,7 +106,9 @@ h1.page-title { color:%(PRIMARY_NAVY)s; margin:0; }
 @media (max-width:800px){  #cards-grid{grid-template-columns:repeat(2,1fr);} }
 @media (max-width:520px){  #cards-grid{grid-template-columns:1fr;} }
 </style>
-""" % PALETTE, unsafe_allow_html=True)
+""")
+
+st.markdown(_css_tpl.substitute(PALETTE), unsafe_allow_html=True)
 
 # =========================================================
 # Cabeçalho
