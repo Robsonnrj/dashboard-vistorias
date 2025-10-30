@@ -150,22 +150,24 @@ cards = [
 ]
 
 # =========================================================
-# HTML dos Cards
+# HTML dos Cards (sem indentação para não virar code block)
 # =========================================================
-html = ['<div id="cards-grid">']
+cards_html = '<div id="cards-grid">'
 for c in cards:
-    html.append(f"""
-    <a class="st-card" href="?nav={c['path']}" data-path="{c['path']}">
-      <div class="card-ico">{c['icon']}</div>
-      <div class="card-title">{c['title']}</div>
-      <div class="card-hint">{c['hint']}</div>
-      <div class="card-chip">Abrir</div>
-    </a>
-    """)
-html.append("</div>")
+    cards_html += (
+        f'<a class="st-card" href="?nav={c["path"]}" data-path="{c["path"]}">'
+        f'<div class="card-ico">{c["icon"]}</div>'
+        f'<div class="card-title">{c["title"]}</div>'
+        f'<div class="card-hint">{c["hint"]}</div>'
+        f'<div class="card-chip">Abrir</div>'
+        '</a>'
+    )
+cards_html += '</div>'
 
+# =========================================================
 # Script: clique + atalhos 1–5
-_js_tpl = Template("""
+# =========================================================
+cards_js = """
 <script>
 document.addEventListener('click', function(e){
   const a = e.target.closest('a.st-card');
@@ -176,18 +178,18 @@ document.addEventListener('click', function(e){
   qs.set('nav', dest);
   window.location.search = qs.toString();
 });
-
 document.addEventListener('keydown', function(e){
-  const idx = parseInt(e.key, 10) - 1;
-  if (idx >= 0 && idx < 5){
-    const list = Array.from(document.querySelectorAll('#cards-grid a.st-card'));
-    if (list[idx]) list[idx].click();
-  }
+  const n = parseInt(e.key, 10);
+  if (!Number.isInteger(n) || n < 1 || n > 5) return;
+  const list = Array.from(document.querySelectorAll('#cards-grid a.st-card'));
+  const el = list[n-1];
+  if (el) el.click();
 });
 </script>
-""")
+"""
 
-st.markdown(_js_tpl.substitute(), unsafe_allow_html=True)
-st.markdown("\n".join(html), unsafe_allow_html=True)
+# Renderiza HTML + JS (sem escapar)
+st.markdown(cards_html, unsafe_allow_html=True)
+st.markdown(cards_js, unsafe_allow_html=True)
 
 st.caption("Dica: use as teclas **1–5** para abrir as seções rapidamente.")
