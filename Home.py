@@ -1,82 +1,41 @@
 # -*- coding: utf-8 -*-
-import streamlit as st
-from streamlit_option_menu import option_menu
-
-from core.config import has_gsheets
-from features import cadastro, status, relatorios, dashboard
-from core.data_loader import clear_caches
-
-
-st.set_page_config(page_title="CRO1 — Seção de Vistorias", layout="wide")
-
-LIGHT_CSS = """
-<style>
-.block-container { max-width: 1400px; padding-top: 1rem; }
-[data-testid="stSidebar"] { background: #fff; border-right:1px solid #e5e7eb; }
-section.main { background: #fff; }
-.stButton>button { border-radius:10px; }
-</style>
 """
-st.markdown(LIGHT_CSS, unsafe_allow_html=True)
+Home — CRO/1 Sistema de Vistorias
+Página inicial com menu de ícones
+"""
 
-with st.sidebar:
-    st.markdown("### Sistema CRO1 — Gestão de Vistorias")
-    st.write("🔌 Google Sheets:", "ON ✅" if has_gsheets() else "OFF ❌")
-    MENU = option_menu(
-        "",
-        ["📊 Dashboard", "📝 Cadastro", "🔁 Status/Auditoria", "📄 Relatórios (PDF)"],
-        icons=["bar-chart","file-plus","arrow-repeat","file-earmark-pdf"],
-        default_index=0,
-        styles={
-            "nav-link": {"font-size":"15px", "text-align":"left", "margin":"2px"},
-            "nav-link-selected": {"background-color":"#f3f4f6"},
-        }
-    )
-# mapeamento de abas (fica salvo na sessão)
-default_tabs = {
-    "solicitacoes": "ACOMPANHAMENTO VISTORIAS",   # fonte dos dashboards/solicitações
-    "validacao":    "Validacao_de_Dados",         # lista oficial de OMs
-    "auditoria":    "Auditoria_Vistorias",        # se você tiver essa aba
-}
+from __future__ import annotations
+import streamlit as st
 
-if "tabs_map" not in st.session_state:
-    st.session_state["tabs_map"] = default_tabs.copy()
+st.set_page_config(
+    page_title="CRO/1 — Sistema de Vistorias",
+    page_icon="🏠",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-with st.sidebar.expander("⚙️ Abas usadas pelo sistema", expanded=False):
-    # lista todas as abas do arquivo para facilitar
-    try:
-        all_tabs = [ws.title for ws in core.data_loader._book().worksheets()]
-    except Exception:
-        all_tabs = []
-    st.session_state["tabs_map"]["solicitacoes"] = st.selectbox(
-        "Aba de Solicitações / Base dos Dashboards",
-        options=all_tabs or [default_tabs["solicitacoes"]],
-        index=(all_tabs.index(default_tabs["solicitacoes"]) if default_tabs["solicitacoes"] in all_tabs else 0),
-        key="tab_solic"
-    )
-    st.session_state["tabs_map"]["validacao"] = st.selectbox(
-        "Aba de Validação (OMs oficiais)",
-        options=all_tabs or [default_tabs["validacao"]],
-        index=(all_tabs.index(default_tabs["validacao"]) if default_tabs["validacao"] in all_tabs else 0),
-        key="tab_valid"
-    )
-    st.session_state["tabs_map"]["auditoria"] = st.selectbox(
-        "Aba de Auditoria (opcional)",
-        options=["(não usar)"] + (all_tabs or []),
-        index=0,
-        key="tab_audit"
-    )
+st.markdown("""
+<style>
+.block-container { padding-top: 2rem; padding-bottom: 3rem; text-align:center; }
+.icon-btn button[kind="secondary"]{height:120px;width:120px;font-size:60px;border-radius:24px;}
+.icon-caption{margin-top:8px;font-weight:600;font-size:.95rem;text-align:center;}
+</style>
+""", unsafe_allow_html=True)
 
-   
-    if st.button("🔄 Atualizar dados (limpar cache)"):
-        clear_caches()
-        st.toast("Cache limpo. Recarregando…")
-        st.rerun()
-if MENU == "📊 Dashboard":
-    dashboard.page()
-elif MENU == "📝 Cadastro":
-    cadastro.page()
-elif MENU == "🔁 Status/Auditoria":
-    status.page()
-else:
-    relatorios.page()
+st.markdown("<h1>Navegação</h1>", unsafe_allow_html=True)
+st.write("Clique em um ícone para abrir a seção")
+st.write("")
+
+def icon(link_path: str, emoji: str, label: str):
+    st.markdown("<div class='icon-btn'>", unsafe_allow_html=True)
+    if st.button(emoji, help=label, type="secondary", key=label):
+        st.switch_page(link_path)
+    st.markdown(f"<div class='icon-caption'>{label}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+c1,c2,c3,c4,c5 = st.columns(5, gap="large")
+with c1: icon("pages/Cadastro_de_vistorias.py", "🗂️", "Cadastro de Vistorias")
+with c2: icon("pages/Dashboard_operacional.py", "📊", "Dashboard Operacional")
+with c3: icon("pages/Relatorios.py", "📑", "Relatórios")
+with c4: icon("pages/Status_Andamento.py", "🔄", "Status / Andamento")
+with c5: icon("pages/Auditoria.py", "🕵️", "Auditoria")
