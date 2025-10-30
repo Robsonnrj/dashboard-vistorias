@@ -94,17 +94,10 @@ h1.page-title { color:%(PRIMARY_NAVY)s; margin:0; }
 }
 
 /* Subtexto e Chip */
-.card-hint {
-  display:block; margin-top:6px; color:%(TEXT_MUTED)s;
-  font-weight:400; font-size:14px;
-}
-.card-chip {
-  display:inline-block; margin-top:14px;
-  padding:6px 18px; border-radius:20px;
-  background:%(ACCENT_BLUE_LT)s; color:%(ACCENT_BLUE)s;
-  border:1px solid #C9DAFF;
-  font-size:14px; font-weight:600; letter-spacing:.2px;
-}
+.card-hint { display:block; margin-top:6px; color:%(TEXT_MUTED)s; font-weight:400; font-size:14px; }
+.card-chip  { display:inline-block; margin-top:14px; padding:6px 18px; border-radius:20px;
+              background:%(ACCENT_BLUE_LT)s; color:%(ACCENT_BLUE)s; border:1px solid #C9DAFF;
+              font-size:14px; font-weight:600; letter-spacing:.2px; }
 
 /* Responsivo */
 @media (max-width:1400px){ #cards-grid{grid-template-columns:repeat(4,1fr);} }
