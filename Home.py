@@ -1,6 +1,6 @@
 from __future__ import annotations
-import streamlit.components.v1 as components
 import streamlit as st
+
 try:
     from core.config import SHEET_TABS  # type: ignore
 except Exception:
@@ -10,9 +10,9 @@ except Exception:
         "relatorios":   "Relatorios",
     }
 
-# =========================================================
+# =========================
 # Config da página
-# =========================================================
+# =========================
 st.set_page_config(
     page_title="CRO/1 — Sistema de Vistorias",
     page_icon="🏠",
@@ -21,43 +21,19 @@ st.set_page_config(
 )
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
-# =========================================================
-# Router imediato (se veio com ?nav=...)
-# =========================================================
-def _get_nav_param():
-    try:
-        nav = st.query_params.get("nav", None)
-        if isinstance(nav, list):
-            nav = nav[0]
-        return nav
-    except Exception:
-        # compat para versões mais antigas
-        return None
-
-_nav = _get_nav_param()
-if _nav:
-    # limpa o parâmetro e navega
-    try:
-        st.query_params.clear()
-    except Exception:
-        pass
-    st.switch_page(_nav)
-
-# =========================================================
+# =========================
 # Paleta — Azul institucional
-# =========================================================
-PRIMARY_NAVY   = "#0F2A3A"  # faixa/cabeçalho
-ACCENT_BLUE    = "#1E40AF"  # ícones/botões
-ACCENT_BLUE_LT = "#E8F0FF"  # chip "Abrir"
+# =========================
+PRIMARY_NAVY   = "#0F2A3A"
+ACCENT_BLUE    = "#1E40AF"
+ACCENT_BLUE_LT = "#E8F0FF"
 TEXT_MUTED     = "#64748B"
-CARD_BG        = "#FFFFFF"
 CARD_BORDER    = "#E8EEF5"
-DIVIDER        = "#E6ECF2"
 BG             = "#F7F9FC"
 
-# =========================================================
-# Estilo
-# =========================================================
+# =========================
+# CSS global (sem iframe)
+# =========================
 st.markdown(f"""
 <style>
 /* fundo app */
@@ -66,74 +42,68 @@ st.markdown(f"""
 }}
 .block-container{{padding-top:2.2rem;padding-bottom:3rem;}}
 
-/* título */
-h1.page-title {{
-  color:{PRIMARY_NAVY}; margin:0;
-}}
-.page-sub {{
-  color:{TEXT_MUTED}; font-size:18px; margin-top:6px;
-}}
-
-/* faixa institucional */
+/* cabeçalho */
+h1.page-title {{ color:{PRIMARY_NAVY}; margin:0; }}
+.page-sub {{ color:{TEXT_MUTED}; font-size:18px; margin-top:6px; }}
 .header-strip {{
   position:absolute; right:60px; top:86px;
   background:{PRIMARY_NAVY}; color:#E6F2EA;
-  padding:10px 20px; border-radius:12px; font-size:14px;
-  letter-spacing:.2px;
+  padding:10px 20px; border-radius:12px; font-size:14px; letter-spacing:.2px;
 }}
-.hr {{ height:2px; background:{DIVIDER}; margin:20px 0 10px 0; border-radius:2px; }}
+.hr {{ height:2px; background:#E6ECF2; margin:20px 0 10px; border-radius:2px; }}
 
-/* grid dos cards */
-.cards {{
-  display:grid;
-  grid-template-columns: repeat(5, minmax(220px,1fr));
+/* GRID + CARDS (botões streamlit) */
+#cards-grid {{
+  display:grid; grid-template-columns:repeat(5, minmax(220px,1fr));
   gap:28px; margin-top:22px;
 }}
-.card {{
-  position:relative;
-  background:{CARD_BG};
-  border:1.5px solid {CARD_BORDER};
-  border-radius:20px;
-  padding:26px 22px 74px 22px;
-  box-shadow:0 10px 30px rgba(15,42,58,0.08);
-  transition: transform .15s ease, box-shadow .2s ease, border-color .2s ease;
-  text-decoration:none !important; display:block;
+#cards-grid .stButton > button {{
+  width:100%; height:220px; text-align:center;
+  border-radius:20px; border:1.5px solid {CARD_BORDER};
+  background:#FFFFFF; color:{PRIMARY_NAVY};
+  box-shadow:0 10px 30px rgba(15,42,58,.08);
+  transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease;
+  padding:18px 16px;
+  line-height:1.25;                   /* melhora quebra de linha */
+  white-space:pre-wrap;                /* respeita quebras \n no label */
+  font-size:18px; font-weight:600;
 }}
-.card:hover {{
+#cards-grid .stButton > button:hover {{
   transform: translateY(-2px);
   border-color:#D7E3F5;
-  box-shadow:0 16px 36px rgba(30,64,175,0.16);
+  box-shadow:0 16px 36px rgba(30,64,175,.16);
+  background:#FFFFFF;
 }}
-.icon-circle {{
-  width:68px; height:68px; background:{ACCENT_BLUE}; color:#fff;
-  display:grid; place-items:center; border-radius:50%;
-  font-size:30px; margin:2px auto 12px auto;
-  box-shadow:0 6px 16px rgba(30,64,175,0.30);
+/* ícone circular (feito com texto) */
+.card-ico {{
+  display:inline-grid; place-items:center;
+  width:68px; height:68px; border-radius:50%;
+  background:{ACCENT_BLUE}; color:#fff; font-size:30px;
+  box-shadow:0 6px 16px rgba(30,64,175,.30);
+  margin:2px auto 10px auto;
 }}
-.card h3 {{
-  color:{PRIMARY_NAVY}; font-size:20px; line-height:1.25;
-  text-align:center; margin:6px 0 8px 0;
+.card-hint {{
+  display:block; margin-top:6px; color:{TEXT_MUTED};
+  font-weight:400; font-size:14px;
 }}
-.card .hint {{
-  color:{TEXT_MUTED}; text-align:center; font-size:14px; min-height:42px;
+/* chip "Abrir" */
+.card-chip {{
+  display:inline-block; margin-top:14px;
+  padding:6px 18px; border-radius:20px;
+  background:{ACCENT_BLUE_LT}; color:{ACCENT_BLUE}; border:1px solid #C9DAFF;
+  font-size:14px; font-weight:600; letter-spacing:.2px;
 }}
-.card .chip {{
-  position:absolute; left:50%; transform:translateX(-50%); bottom:18px;
-  background:{ACCENT_BLUE_LT}; border:1px solid #C9DAFF;
-  color:{ACCENT_BLUE}; padding:6px 18px; border-radius:20px;
-  font-weight:600; font-size:14px; letter-spacing:.2px;
-}}
-
-@media (max-width: 1400px) {{ .cards {{ grid-template-columns: repeat(4, 1fr); }} }}
-@media (max-width: 1100px) {{ .cards {{ grid-template-columns: repeat(3, 1fr); }} }}
-@media (max-width: 800px)  {{ .cards {{ grid-template-columns: repeat(2, 1fr); }} }}
-@media (max-width: 520px)  {{ .cards {{ grid-template-columns: 1fr; }} }}
+/* responsivo */
+@media (max-width:1400px){{ #cards-grid{{grid-template-columns:repeat(4,1fr);} }}}
+@media (max-width:1100px){{ #cards-grid{{grid-template-columns:repeat(3,1fr);} }}}
+@media (max-width:800px) {{ #cards-grid{{grid-template-columns:repeat(2,1fr);} }}}
+@media (max-width:520px) {{ #cards-grid{{grid-template-columns:1fr;} }}}
 </style>
 """, unsafe_allow_html=True)
 
-# =========================================================
+# =========================
 # Cabeçalho
-# =========================================================
+# =========================
 st.markdown("""
 <div style="position:relative;">
   <div>
@@ -145,121 +115,62 @@ st.markdown("""
 <div class="hr"></div>
 """, unsafe_allow_html=True)
 
-# =========================================================
-# Listener no PAI: recebe postMessage do iframe e navega no topo
-# =========================================================
+# =========================
+# Cards (100% Streamlit)
+# =========================
+cards = [
+    {"k":"1","title":"Cadastro de Vistorias","icon":"🗂️","hint":"Criar, editar e validar registros","path":"pages/Cadastro_de_vistorias.py"},
+    {"k":"2","title":"Dashboard Operacional","icon":"📊","hint":"KPIs, prazos e mapa de calor","path":"pages/Dashboard_operacional.py"},
+    {"k":"3","title":"Relatórios","icon":"📑","hint":"Emitir PDFs e planilhas","path":"pages/Relatorios.py"},
+    {"k":"4","title":"Status / Andamento","icon":"🔄","hint":"Triagem e acompanhamento","path":"pages/Status_Andamento.py"},
+    {"k":"5","title":"Auditoria","icon":"🕵️","hint":"Logs e rastreabilidade","path":"pages/Auditoria.py"},
+]
+
+# Wrapper para grid (id para CSS)
+st.markdown('<div id="cards-grid">', unsafe_allow_html=True)
+
+# Render dos botões-card
+clicked_path = None
+for c in cards:
+    label = f"""
+<span class="card-ico">{c['icon']}</span>
+{c['title']}
+<span class="card-hint">{c['hint']}</span>
+<span class="card-chip">Abrir</span>
+""".strip()
+    # botão como card (unsafe permite HTML no label)
+    if st.button(label, key=f"card-{c['k']}", use_container_width=True, help=c["title"]):
+        clicked_path = c["path"]
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Navegação imediata se clicou
+if clicked_path:
+    st.switch_page(clicked_path)
+
+# =========================
+# Atalhos 1–5 (clicam os botões)
+# =========================
 st.markdown("""
 <script>
-window.addEventListener("message", function(ev){
-  try{
-    if(ev && ev.data && ev.data.nav){
-      const dest = ev.data.nav;
-      const qs = new URLSearchParams(window.location.search);
-      qs.set("nav", dest);
-      // navega no topo da janela
-      window.location.search = qs.toString();
+document.addEventListener('keydown', function(e){
+  const map = {'1':'card-1','2':'card-2','3':'card-3','4':'card-4','5':'card-5'};
+  if(map[e.key]){
+    const btn = parent.document.querySelector(`button[kind="secondary"][data-testid="baseButton-secondary"][aria-live="polite"][id^="` + map[e.key] + `"]`)
+              || document.querySelector('button[data-testid="baseButton-secondary"][id="' + map[e.key] + '"]')
+              || document.querySelector('button[id*="' + map[e.key] + '"]');
+    // fallback: procura pelo botão pelo id do Streamlit
+    const anyBtn = document.querySelector('div#cards-grid .stButton button');
+    if (btn) btn.click();
+    else if (anyBtn && map[e.key]) {
+      const idx = parseInt(e.key, 10) - 1;
+      const list = Array.from(document.querySelectorAll('div#cards-grid .stButton button'));
+      if (list[idx]) list[idx].click();
     }
-  }catch(e){}
-}, false);
+  }
+});
 </script>
 """, unsafe_allow_html=True)
 
-# =========================================================
-# Definição dos cards (com seus paths reais)
-# =========================================================
-cards = [
-    {"k":"1","title":"Cadastro de Vistorias","hint":"Criar, editar e validar registros","path":"pages/Cadastro_de_vistorias.py","svg":"""
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 7h7l2 2h9v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="white" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
-    """},
-    {"k":"2","title":"Dashboard Operacional","hint":"KPIs, prazos e mapa de calor","path":"pages/Dashboard_operacional.py","svg":"""
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 13v7M10 4v16M16 9v11M22 2v18" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
-    """},
-    {"k":"3","title":"Relatórios","hint":"Emitir PDFs e planilhas","path":"pages/Relatorios.py","svg":"""
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="white" stroke-width="1.8"/><path d="M14 2v6h6" stroke="white" stroke-width="1.8"/><path d="M8 13h8M8 17h8" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg>
-    """},
-    {"k":"4","title":"Status / Andamento","hint":"Triagem e acompanhamento","path":"pages/Status_Andamento.py","svg":"""
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 1 1-3.2-6.9" stroke="white" stroke-width="1.8"/><path d="M21 3v6h-6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    """},
-    {"k":"5","title":"Auditoria","hint":"Logs e rastreabilidade","path":"pages/Auditoria.py","svg":"""
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-10V6l-8-4-8 4v6c0 6 8 10 8 10z" stroke="white" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    """},
-]
-
-# =========================================================
-# HTML dos cards (iframe) — com target="_top" + postMessage
-# (USANDO % FORMAT ao invés de f-string, para não conflitar com {})
-# =========================================================
-PALETTE = {
-    "CARD_BORDER": CARD_BORDER,
-    "ACCENT_BLUE": ACCENT_BLUE,
-    "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
-    "PRIMARY_NAVY": PRIMARY_NAVY,
-    "TEXT_MUTED": TEXT_MUTED,
-}
-
-cards_html = """
-<style>
-.menu-grid{
-  display:grid; grid-template-columns:repeat(5,minmax(220px,1fr)); gap:28px; margin-top:22px;
-}
-.menu-card{
-  position:relative; background:#fff; border:1.5px solid %(CARD_BORDER)s;
-  border-radius:20px; padding:26px 22px 74px; text-decoration:none;
-  box-shadow:0 10px 30px rgba(15,42,58,.08);
-  transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease;
-  display:block; color:inherit;
-}
-.menu-card:hover{ transform:translateY(-2px); border-color:#D7E3F5; box-shadow:0 16px 36px rgba(30,64,175,.16); }
-.icon-circle{
-  width:68px; height:68px; border-radius:50%%; background:%(ACCENT_BLUE)s; display:grid; place-items:center;
-  margin:2px auto 12px; box-shadow:0 6px 16px rgba(30,64,175,.30);
-}
-.menu-card h3{ color:%(PRIMARY_NAVY)s; font-size:20px; line-height:1.25; text-align:center; margin:6px 0 8px; }
-.menu-card .hint{ color:%(TEXT_MUTED)s; text-align:center; font-size:14px; min-height:42px; }
-.menu-card .chip{
-  position:absolute; left:50%%; transform:translateX(-50%%); bottom:18px;
-  background:%(ACCENT_BLUE_LT)s; border:1px solid #C9DAFF; color:%(ACCENT_BLUE)s;
-  padding:6px 18px; border-radius:20px; font-weight:600; font-size:14px;
-}
-
-/* responsivo */
-@media (max-width:1400px){ .menu-grid{grid-template-columns:repeat(4,1fr);} }
-@media (max-width:1100px){ .menu-grid{grid-template-columns:repeat(3,1fr);} }
-@media (max-width:800px){ .menu-grid{grid-template-columns:repeat(2,1fr);} }
-@media (max-width:520px){ .menu-grid{grid-template-columns:1fr;} }
-</style>
-<div class="menu-grid">
-""" % PALETTE
-
-for c in cards:
-    cards_html += f"""
-    <a class="menu-card"
-       href="?nav={c['path']}"
-       id="card-{c['k']}"
-       aria-label="{c['title']}"
-       target="_top"
-       onclick="try{{ parent.postMessage({{nav: '{c['path']}'}}, '*'); }}catch(e){{}}"
-    >
-      <div class="icon-circle">{c['svg']}</div>
-      <h3>{c['title']}</h3>
-      <div class="hint">{c['hint']}</div>
-      <div class="chip">Abrir</div>
-    </a>
-    """
-
-cards_html += """
-</div>
-<script>
-document.addEventListener('keydown', function(e){
-  const map={'1':'card-1','2':'card-2','3':'card-3','4':'card-4','5':'card-5'};
-  if(map[e.key]){ const a=document.getElementById(map[e.key]); if(a) a.click(); }
-});
-</script>
-"""
-components.html(cards_html, height=560, scrolling=False)
-
-
-# =========================================================
-# Rodapé
-# =========================================================
 st.caption("Dica: use as teclas **1–5** para abrir as seções rapidamente.")
+
