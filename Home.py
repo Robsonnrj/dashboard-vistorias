@@ -1,4 +1,5 @@
 from __future__ import annotations
+import streamlit.components.v1 as components
 import streamlit as st
 try:
     from core.config import SHEET_TABS  # type: ignore
@@ -125,57 +126,89 @@ st.markdown("""
 # =========================================================
 # Definição dos cards (com seus paths reais)
 # =========================================================
+
 cards = [
-    {"k":"1", "title":"Cadastro de Vistorias",  "icon":"🗂️", "hint":"Criar, editar e validar registros", "path":"pages/Cadastro_de_vistorias.py"},
-    {"k":"2", "title":"Dashboard Operacional", "icon":"📊", "hint":"KPIs, prazos e mapa de calor",       "path":"pages/Dashboard_operacional.py"},
-    {"k":"3", "title":"Relatórios",            "icon":"📑", "hint":"Emitir PDFs e planilhas",            "path":"pages/Relatorios.py"},
-    {"k":"4", "title":"Status / Andamento",    "icon":"🔄", "hint":"Triagem e acompanhamento",          "path":"pages/Status_Andamento.py"},
-    {"k":"5", "title":"Auditoria",             "icon":"🕵️", "hint":"Logs e rastreabilidade",            "path":"pages/Auditoria.py"},
+    {"k":"1","title":"Cadastro de Vistorias","hint":"Criar, editar e validar registros","path":"pages/Cadastro_de_vistorias.py","svg":"""
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 7h7l2 2h9v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="white" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 7V5a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+    """},
+    {"k":"2","title":"Dashboard Operacional","hint":"KPIs, prazos e mapa de calor","path":"pages/Dashboard_operacional.py","svg":"""
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 13v7M10 4v16M16 9v11M22 2v18" stroke="white" stroke-width="1.8" stroke-linecap="round"/></svg>
+    """},
+    {"k":"3","title":"Relatórios","hint":"Emitir PDFs e planilhas","path":"pages/Relatorios.py","svg":"""
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="white" stroke-width="1.8"/><path d="M14 2v6h6" stroke="white" stroke-width="1.8"/><path d="M8 13h8M8 17h8" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg>
+    """},
+    {"k":"4","title":"Status / Andamento","hint":"Triagem e acompanhamento","path":"pages/Status_Andamento.py","svg":"""
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M21 12a9 9 0 1 1-3.2-6.9" stroke="white" stroke-width="1.8"/><path d="M21 3v6h-6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    """},
+    {"k":"5","title":"Auditoria","hint":"Logs e rastreabilidade","path":"pages/Auditoria.py","svg":"""
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 22s8-4 8-10V6l-8-4-8 4v6c0 6 8 10 8 10z" stroke="white" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    """},
 ]
 
-# =========================================================
-# Router via query string (?nav=pages/...py)
-# — Clicar no card (ou atalho do teclado) seta nav e navega
-# =========================================================
-nav = st.query_params.get("nav", [None])
-nav = nav[0] if isinstance(nav, list) else nav
-if nav:
-    # Navega para a página real
-    st.switch_page(nav)
+ACCENT_BLUE    = "#1E40AF"
+ACCENT_BLUE_LT = "#E8F0FF"
+PRIMARY_NAVY   = "#0F2A3A"
+TEXT_MUTED     = "#64748B"
+CARD_BORDER    = "#E8EEF5"
 
-# =========================================================
-# Renderização dos cards (HTML clicável)
-# =========================================================
-html = ['<div class="cards">']
+cards_html = """
+<style>
+.menu-grid{
+  display:grid; grid-template-columns:repeat(5,minmax(220px,1fr)); gap:28px; margin-top:22px;
+}
+.menu-card{
+  position:relative; background:#fff; border:1.5px solid %(CARD_BORDER)s;
+  border-radius:20px; padding:26px 22px 74px; text-decoration:none;
+  box-shadow:0 10px 30px rgba(15,42,58,.08);
+  transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease;
+  display:block; color:inherit;
+}
+.menu-card:hover{ transform:translateY(-2px); border-color:#D7E3F5; box-shadow:0 16px 36px rgba(30,64,175,.16); }
+.icon-circle{
+  width:68px; height:68px; border-radius:50%%; background:%(ACCENT_BLUE)s; display:grid; place-items:center;
+  margin:2px auto 12px; box-shadow:0 6px 16px rgba(30,64,175,.30);
+}
+.menu-card h3{ color:%(PRIMARY_NAVY)s; font-size:20px; line-height:1.25; text-align:center; margin:6px 0 8px; }
+.menu-card .hint{ color:%(TEXT_MUTED)s; text-align:center; font-size:14px; min-height:42px; }
+.menu-card .chip{
+  position:absolute; left:50%%; transform:translateX(-50%%); bottom:18px;
+  background:%(ACCENT_BLUE_LT)s; border:1px solid #C9DAFF; color:%(ACCENT_BLUE)s;
+  padding:6px 18px; border-radius:20px; font-weight:600; font-size:14px;
+}
+@media (max-width:1400px){ .menu-grid{grid-template-columns:repeat(4,1fr);} }
+@media (max-width:1100px){ .menu-grid{grid-template-columns:repeat(3,1fr);} }
+@media (max-width:800px){ .menu-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:520px){ .menu-grid{grid-template-columns:1fr;} }
+</style>
+<div class="menu-grid">
+""" % {
+    "ACCENT_BLUE": ACCENT_BLUE,
+    "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
+    "PRIMARY_NAVY": PRIMARY_NAVY,
+    "TEXT_MUTED": TEXT_MUTED,
+    "CARD_BORDER": CARD_BORDER,
+}
+
 for c in cards:
-    href = f"?nav={c['path']}"
-    html.append(f"""
-    <a class="card" href="{href}" id="card-{c['k']}" data-key="{c['k']}">
-      <div class="icon-circle">{c['icon']}</div>
+    cards_html += f"""
+    <a class="menu-card" href="?nav={c['path']}" id="card-{c['k']}" aria-label="{c['title']}">
+      <div class="icon-circle">{c['svg']}</div>
       <h3>{c['title']}</h3>
       <div class="hint">{c['hint']}</div>
       <div class="chip">Abrir</div>
     </a>
-    """)
-html.append("</div>")
-st.markdown("\n".join(html), unsafe_allow_html=True)
+    """
 
-# =========================================================
-# Atalhos de teclado 1–5 (aciona os cards)
-# =========================================================
-st.markdown("""
+cards_html += """
+</div>
 <script>
-document.addEventListener('keydown', function(e) {{
-  const map = {{'1':'card-1','2':'card-2','3':'card-3','4':'card-4','5':'card-5'}};
-  if (map[e.key]) {{
-    const el = document.getElementById(map[e.key]);
-    if (el) el.click();
-  }}
-}});
+document.addEventListener('keydown', function(e){
+  const map={'1':'card-1','2':'card-2','3':'card-3','4':'card-4','5':'card-5'};
+  if(map[e.key]){ const a=document.getElementById(map[e.key]); if(a) a.click(); }
+});
 </script>
-""", unsafe_allow_html=True)
+"""
 
-# =========================================================
-# Rodapé
-# =========================================================
-st.caption("Dica: use as teclas **1–5** para abrir as seções rapidamente.")
+# Renderiza os cards em um iframe (não escapa o HTML)
+components.html(cards_html, height=560, scrolling=False)
+# ===== FIM DO TRECHO SUBSTITUÍDO =====
