@@ -1,94 +1,311 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
-from core.data_loader import read_df
-from core.audit import atualizar_status, trilha
+from datetime import date, datetime
 
-STATUS = [
-    "SOLICITADA",
-    "AGENDADA",
-    "EM_EXECUCAO",
-    "FINALIZADA",
-    "RELATORIO_GERADO",
-    "INTEGRADA_OBRAS",
+from core.config import TAB_SOLICITACOES, TAB_AUDIT, TAB_VALIDACAO
+from core.data_loader import read_df, overwrite_tab_from_df
+from core.utils import pick_col
+
+# Inicializa tabs_map se não existir
+if "tabs_map" not in st.session_state:
+    st.session_state["tabs_map"] = {
+        "solicitacoes": "ACOMPANHAMENTO VISTORIAS",
+        "validacao":    "Validacao_de_Dados",
+        "auditoria":    "Auditoria_Vistorias",
+    }
+
+URGENCIAS = ["Não Prioridade", "Prioridade", "Urgente"]
+SITUACOES = ["Não Atendida", "Em andamento", "Finalizada"]
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _clean(x) -> str:
+    return "" if pd.isna(x) else str(x).strip()
+
+def _date_or(x, default: date) -> date:
+    d = pd.to_datetime(x, errors="coerce")
+    return d.date() if pd.notna(d) else default
+
+def _load_oms_map():
+    """Monta opções de OM e mapas display->sigla e sigla->diretoria."""
+    options, disp2sig, sig2dir = [], {}, {}
+    for tab in (TAB_VALIDACAO, TAB_SOLICITACOES):
+        try:
+            df = read_df(tab)
+        except Exception:
+            continue
+        if df.empty:
+            continue
+
+        cols = {c.lower(): c for c in df.columns}
+        c_sig = cols.get("om") or cols.get("om apoiada") or cols.get("sigla")
+        c_nom = cols.get("organização militar") or cols.get("organização") or cols.get("om")
+        c_dir = cols.get("diretoria responsável") or cols.get("diretoria")
+        if not c_sig or not c_dir:
+            continue
+
+        tmp = pd.DataFrame({"sig": df[c_sig].map(_clean)})
+        tmp["nome"] = df[c_nom].map(_clean) if c_nom else ""
+        tmp["dir"] = df[c_dir].map(_clean)
+        tmp = tmp[tmp["sig"] != ""].drop_duplicates("sig")
+
+        for _, r in tmp.iterrows():
+            label = f"{r['sig']} — {r['nome']}" if r["nome"] else r["sig"]
+            if label not in options:
+                options.append(label)
+                disp2sig[label] = r["sig"]
+                sig2dir[r["sig"]] = r["dir"]
+        break
+
+    options.append("Outra / não listada…")
+    disp2sig["Outra / não listada…"] = ""
+    return options, disp2sig, sig2dir
+
+def _load_audit_trail(numero: str) -> pd.DataFrame:
+    """Filtra trilha de auditoria pelo número do registro."""
+    try:
+        hist = read_df(TAB_AUDIT)
+    except Exception:
+        return pd.DataFrame()
+    if hist.empty or "numero" not in hist.columns:
+        return pd.DataFrame()
+    return hist[hist["numero"].astype(str) == str(numero)].sort_values("ts", ascending=False)
+
+# ---- auditoria de alterações ----
+AUDIT_FIELDS = [
+    "objeto de vistoria", "om apoiada", "diretoria responsável",
+    "classificação de urgência", "situação",
+    "data da solicitação", "data da vistoria",
+    "status - atualização semanal", "observações",
 ]
 
-def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    """Retorna a primeira coluna do DF que 'bate' com a lista de candidatos (tolerante a acentos/caixa)."""
-    if df is None or df.empty:
-        return None
-    def norm(s: str) -> str:
-        import unicodedata
-        s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
-        return s.strip().lower()
-    cols = list(df.columns)
-    # match exato normalizado
-    for cand in candidates:
-        for c in cols:
-            if norm(c) == norm(cand):
-                return c
-    # match por "contém"
-    for cand in candidates:
-        target = norm(cand)
-        for c in cols:
-            if target in norm(c):
-                return c
-    return None
+def _now_ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+def _append_audit(numero: str, changes: dict):
+    """Adiciona 1 linha por campo alterado na aba de auditoria."""
+    if not changes:
+        return
+    try:
+        hist = read_df(TAB_AUDIT)
+    except Exception:
+        hist = pd.DataFrame()
+
+    rows = []
+    for campo, (antes, depois) in changes.items():
+        rows.append({
+            "numero": str(numero),
+            "ts": _now_ts(),
+            "campo": campo,
+            "antes": "" if pd.isna(antes) else str(antes),
+            "depois": "" if pd.isna(depois) else str(depois),
+        })
+
+    new_hist = pd.concat([hist, pd.DataFrame(rows)], ignore_index=True) if not hist.empty else pd.DataFrame(rows)
+    overwrite_tab_from_df(TAB_AUDIT, new_hist, keep_header=True)
+
+def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) -> dict:
+    """Compara valores antigos x novos e retorna {campo_humano: (antes, depois)} só para os que mudaram."""
+    changes = {}
+    for human in AUDIT_FIELDS:
+        col_real = cols_map.get(human)
+        if not col_real:
+            continue
+        old = orig_row.get(col_real, "")
+        new = new_row.get(col_real, "")
+        old_s = "" if pd.isna(old) else str(old).strip()
+        new_s = "" if pd.isna(new) else str(new).strip()
+        if old_s != new_s:
+            changes[human] = (old_s, new_s)
+    return changes
+
+# -----------------------------
+# Página
+# -----------------------------
 def page():
     st.header("🔁 VIS-003 — Controle de Status e Auditoria")
-
-    # ---- base de solicitações (aba principal)
     tab_base = st.session_state["tabs_map"]["solicitacoes"]
     df = read_df(tab_base)
     if df.empty:
         st.info("Sem dados para auditoria.")
         return
+    col_num = pick_col(df, ["numero", "número", "num", "nº", "id", "protocolo"])
 
-    # identifica coluna do número (tolerante a variações)
-    col_num = _pick_col(df, ["numero", "número", "num", "nº", "id", "protocolo"])
-    if not col_num:
-        st.error("Não encontrei a coluna de número da solicitação na aba base.")
-        st.dataframe(df.head(10), use_container_width=True)
+    try:
+        df = read_df(TAB_SOLICITACOES)
+    except Exception as e:
+        st.error(f"Falha ao ler a base: {e}")
         return
 
-    # Ordena por número (quando possível) para facilitar a escolha
+    if df.empty:
+        st.info("Sem registros na aba ACOMPANHAMENTO VISTORIAS.")
+        return
+
+    cols = {c.lower(): c for c in df.columns}
+    c_obj = cols.get("objeto de vistoria")
+    c_om  = cols.get("om apoiada") or cols.get("om")
+    c_dir = cols.get("diretoria responsável") or cols.get("diretoria")
+    c_sit = cols.get("situação") or cols.get("situacao")
+    c_urg = cols.get("classificação de urgência") or cols.get("classificacao urgencia")
+    c_dtS = cols.get("data da solicitação") or cols.get("data da solicitacao")
+    c_dtV = cols.get("data da vistoria")
+    c_stw = cols.get("status - atualização semanal") or cols.get("status - atualizacao semanal")
+    c_obs = cols.get("observações") or cols.get("observacoes")
+
+    st.subheader("Selecione o registro para editar")
+    show_cols = [x for x in [c_obj, c_om, c_dir, c_sit, c_dtS] if x in df.columns]
+    show = df[show_cols].copy() if show_cols else df.copy()
+    show = show.reset_index().rename(columns={"index": "linha"})
+    idx = st.selectbox(
+        "Registro",
+        options=show["linha"].tolist(),
+        format_func=lambda i: " | ".join([_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]),
+    )
+    if idx is None:
+        return
+
+    options, disp2sig, sig2dir = _load_oms_map()
+    reg = df.loc[idx].copy()
+
+    # ----------- formulário com keys únicas por registro -----------
+    form_uid = f"r{idx}"
+
+    with st.form(f"frm_status_{form_uid}"):
+        objeto = st.text_input(
+            "OBJETO DE VISTORIA *",
+            value=_clean(reg.get(c_obj, "")),
+            key=f"obj_{form_uid}",
+        )
+
+        om_default = next((k for k, v in disp2sig.items() if v == _clean(reg.get(c_om, ""))), None)
+        default_index = options.index(om_default) if (om_default in options) else None
+
+        om_display = st.selectbox(
+            "OM APOIADA *",
+            options=options,
+            index=default_index,
+            placeholder="Selecione…",
+            key=f"om_{form_uid}",
+        )
+        om_sigla = disp2sig.get(om_display or "", _clean(reg.get(c_om, "")))
+
+        diretoria = st.text_input(
+            "Diretoria Responsável *",
+            value=sig2dir.get(om_sigla, _clean(reg.get(c_dir, ""))),
+            key=f"dir_{form_uid}",
+        )
+
+        urg = st.selectbox(
+            "Classificação de Urgência",
+            URGENCIAS,
+            index=URGENCIAS.index(_clean(reg.get(c_urg, URGENCIAS[0]))) if _clean(reg.get(c_urg, "")) in URGENCIAS else 0,
+            key=f"urg_{form_uid}",
+        )
+        sit = st.selectbox(
+            "Situação",
+            SITUACOES,
+            index=SITUACOES.index(_clean(reg.get(c_sit, SITUACOES[0]))) if _clean(reg.get(c_sit, "")) in SITUACOES else 0,
+            key=f"sit_{form_uid}",
+        )
+
+        dt_sol = st.date_input(
+            "DATA DA SOLICITAÇÃO",
+            value=_date_or(reg.get(c_dtS, ""), date.today()),
+            key=f"dts_{form_uid}",
+        )
+        dt_vis = st.date_input(
+            "DATA DA VISTORIA",
+            value=_date_or(reg.get(c_dtV, ""), date.today()),
+            key=f"dtv_{form_uid}",
+        )
+
+        stw = st.text_input(
+            "STATUS - ATUALIZAÇÃO SEMANAL",
+            value=_clean(reg.get(c_stw, "")),
+            key=f"stw_{form_uid}",
+        )
+        obs = st.text_area(
+            "OBSERVAÇÕES",
+            value=_clean(reg.get(c_obs, "")),
+            height=100,
+            key=f"obs_{form_uid}",
+        )
+
+        salvar = st.form_submit_button("💾 Atualizar registro", type="primary", key=f"save_{form_uid}")
+
+    if not salvar:
+        return
+
+    # ----- valida obrigatórios -----
+    faltando = []
+    if not objeto:    faltando.append("OBJETO DE VISTORIA")
+    if not om_sigla:  faltando.append("OM APOIADA")
+    if not diretoria: faltando.append("Diretoria Responsável")
+    if faltando:
+        st.error("Preencha os campos obrigatórios: " + ", ".join(faltando))
+        return
+
+    # ----- prepara atualização do DF principal -----
+    new_vals = {}
+    if c_obj: new_vals[c_obj] = objeto
+    if c_om:  new_vals[c_om]  = om_sigla
+    if c_dir: new_vals[c_dir] = diretoria
+    if c_urg: new_vals[c_urg] = urg
+    if c_sit: new_vals[c_sit] = sit
+    if c_dtS: new_vals[c_dtS] = pd.to_datetime(dt_sol).strftime("%Y-%m-%d")
+    if c_dtV: new_vals[c_dtV] = pd.to_datetime(dt_vis).strftime("%Y-%m-%d") if dt_vis else ""
+    if c_stw: new_vals[c_stw] = stw
+    if c_obs: new_vals[c_obs] = obs
+
+    # localizar linha alvo por 'numero' se existir; senão usa o idx selecionado
+    cols_all = {c.lower(): c for c in df.columns}
+    c_num = cols_all.get("numero")
+    if c_num and c_num in df.columns and str(df.at[idx, c_num]).strip():
+        numero = str(df.at[idx, c_num]).strip()
+        ixs = df.index[df[c_num].astype(str).str.strip() == numero]
+        idx_target = ixs[0] if len(ixs) > 0 else idx
+    else:
+        numero = str(df.index.get_loc(idx))
+        idx_target = idx
+
+    # diff para auditoria
+    cols_human_to_real = {
+        "objeto de vistoria": c_obj,
+        "om apoiada": c_om,
+        "diretoria responsável": c_dir,
+        "classificação de urgência": c_urg,
+        "situação": c_sit,
+        "data da solicitação": c_dtS,
+        "data da vistoria": c_dtV,
+        "status - atualização semanal": c_stw,
+        "observações": c_obs,
+    }
+    orig_row = df.loc[idx_target].copy()
+    new_row = orig_row.copy()
+    for k, v in new_vals.items():
+        new_row[k] = v
+    changes = _collect_changes(orig_row, new_row, cols_human_to_real)
+
+    # aplica atualização na linha alvo
+    for k, v in new_vals.items():
+        df.at[idx_target, k] = v
+
+    # grava e registra auditoria
     try:
-        df_view = df.copy()
-        df_view[col_num] = df_view[col_num].astype(str)
-        numeros = df_view[col_num].dropna().unique().tolist()
-        numeros = sorted(numeros, key=lambda x: (len(x), x))  # ordenação estável
-    except Exception:
-        numeros = df[col_num].dropna().astype(str).unique().tolist()
+        overwrite_tab_from_df(TAB_SOLICITACOES, df, keep_header=True)
+        _append_audit(numero, changes)
+        st.success("Registro atualizado com sucesso.")
+    except Exception as e:
+        st.error(f"Falha ao salvar: {e}")
 
-    colA, colB = st.columns([2, 1])
-    with colA:
-        numero = st.selectbox("Escolha a solicitação", numeros, index=0 if numeros else None)
-    with colB:
-        novo = st.selectbox("Novo status", STATUS, index=STATUS.index("AGENDADA"))
-
-    justificativa = st.text_input("Justificativa da alteração", placeholder="Descreva o motivo da mudança")
-    responsavel = st.text_input("Responsável (login/posto)", value="usuario")
-
-    if st.button("Atualizar status", type="primary", disabled=not numero):
-        try:
-            atualizar_status(numero, novo, justificativa, responsavel)
-            # limpa cache para refletir a mudança imediatamente
-            try:
-                read_df.clear()
-            except Exception:
-                pass
-            st.success(f"Status da solicitação {numero} atualizado para {novo} e auditoria registrada.")
-        except Exception as e:
-            st.error(f"Falha ao atualizar: {e}")
-
-    st.subheader("📜 Trilha de auditoria")
-    if numero:
-        try:
-            hist = trilha(numero)
-            if isinstance(hist, pd.DataFrame) and not hist.empty:
-                st.dataframe(hist, use_container_width=True, height=360)
-            else:
-                st.info("Sem registros de auditoria para esta solicitação.")
-        except Exception as e:
-            st.warning(f"Não foi possível carregar a trilha de auditoria: {e}")
+    # --------- Trilha de Auditoria ---------
+    st.subheader("📝 Trilha de Auditoria")
+    num = _clean(reg.get("numero", "")) or _clean(reg.get("Numero", ""))
+    hist_df = _load_audit_trail(num)
+    if hist_df.empty:
+        st.info("Sem registros de auditoria para este número.")
+    else:
+        st.dataframe(hist_df, use_container_width=True, height=300)
