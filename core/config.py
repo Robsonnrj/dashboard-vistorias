@@ -1,22 +1,16 @@
+# core/config.py
 # -*- coding: utf-8 -*-
-import streamlit as st
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
-# nomes de abas no Google Sheets
-SHEET_TABS = {
-    "solicitacoes": "Solicitacoes",  # VIS-001 (entrada)
-    "historicos":   "Historicos",    # VIS-003 (auditoria de status)
-    "relatorios":   "Relatorios",    # VIS-005 (metadados de PDFs gerados)
-}
+# Abas fixas usadas pelo sistema
+TAB_SOLICITACOES = "ACOMPANHAMENTO VISTORIAS"  # base de registros (cadastro, dashboards, status)
+TAB_VALIDACAO = "Validacao_de_Dados"  # lista oficial de OMs
+TAB_AUDIT = "Historico_Auditoria"  # trilha de auditoria (VIS-003)
 
 def has_gsheets() -> bool:
+    """Verifica se as credenciais do Google Sheets estão configuradas."""
+    import streamlit as st
     return (
         "gcp_service_account" in st.secrets
         and "gsheets" in st.secrets
-        and "spreadsheet_url" in st.secrets["gsheets"]
-        and bool(st.secrets["gsheets"]["spreadsheet_url"])
+        and st.secrets["gsheets"].get("spreadsheet_url")
     )
