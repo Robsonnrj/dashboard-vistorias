@@ -1,7 +1,9 @@
 from __future__ import annotations
 from string import Template
 import streamlit as st
-from PIL import Image  # <-- adiciona isso
+from PIL import Image 
+from pathlib import Path
+import base64
 
 # =========================================================
 # Import / Fallback de config
@@ -57,6 +59,17 @@ ACCENT_BLUE_LT = "#E8F0FF"
 TEXT_MUTED     = "#64748B"
 CARD_BORDER    = "#E8EEF5"
 BG             = "#F7F9FC"
+
+# =========================================================
+# Helper: carregar imagem local e transformar em Base64
+# =========================================================
+def _img_to_base64(path: str) -> str:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"Imagem não encontrada: {path}")
+
+    img_bytes = file_path.read_bytes()
+    return base64.b64encode(img_bytes).decode()
 
 # =========================================================
 # CSS Global
@@ -141,14 +154,18 @@ h1.page-title { color:$PRIMARY_NAVY; margin:0; }
 """)
 st.markdown(_css_tpl.substitute(PALETTE), unsafe_allow_html=True)
 
+
+
 # =========================================================
 # Cabeçalho com Imagem
 # =========================================================
+icon_b64 = _img_to_base64("house_3661264.png")
+
 st.markdown(
-    """
+    f"""
     <div style="position:relative; margin-bottom:8px;">
       <div style="display:flex; align-items:center; gap:16px;">
-        <img src="house_3661264.png" style="width:48px; height:48px;" />
+        <img src="data:image/png;base64,{icon_b64}" style="width:48px; height:48px;" />
         <div>
           <h1 class="page-title">Navegação</h1>
           <div class="page-sub">Clique em um ícone para abrir a seção</div>
