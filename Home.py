@@ -100,12 +100,21 @@ h1.page-title { color:$PRIMARY_NAVY; margin:0; }
   transform:translateY(-2px); border-color:#D7E3F5;
   box-shadow:0 16px 36px rgba(30,64,175,.16);
 }
-.card-ico{
-  display:inline-grid; place-items:center;
-  width:68px; height:68px; border-radius:50%;
-  background:$ACCENT_BLUE; color:#fff; font-size:30px;
-  box-shadow:0 6px 16px rgba(30,64,175,.30);
-  margin:2px auto 10px auto;
+st.markdown("""
+<div style="position:relative;">
+  <div style="display:flex; align-items:center; gap:16px;">
+    <img src="https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/house_3661264.png" 
+         alt="Home" 
+         style="width:48px; height:48px; object-fit:contain;">
+    <div>
+      <h1 class="page-title">Navegação</h1>
+      <div class="page-sub">Clique em um ícone para abrir a seção</div>
+    </div>
+  </div>
+  <div class="header-strip">CRO/1 — Vistorias Técnicas</div>
+</div>
+<div class="hr"></div>
+""", unsafe_allow_html=True)
 }
 .card-title{ font-size:20px; font-weight:700; margin:8px 0 6px 0; }
 .card-hint{ font-size:14px; color:$TEXT_MUTED; min-height:42px; }
