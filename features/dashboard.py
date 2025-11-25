@@ -275,7 +275,7 @@ def page():
     c2.metric("Atendidas", f"{tot_atd}")
     c3.metric("% Atendimento", f"{pct_atd:.1f}%" if pd.notna(pct_atd) else "—")
     c4.metric("Tempo médio de atendimento", f"{tempo_medio:.1f} dias" if pd.notna(tempo_medio) else "—")
-    c5.metric("Backlog acumulado", int(mensal["backlog"].iloc[-1]) if not mensal.empty else 0)
+    c5.metric("Pendentes", int(mensal["backlog"].iloc[-1]) if not mensal.empty else 0)
 
     # Linha: Pedidos x Atendidas (+ backlog)
     st.subheader("Evolução mensal — Pedidos x Atendidas")
@@ -286,7 +286,7 @@ def page():
         fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["atendidas"],
                                  mode="lines+markers", name="Atendidas"))
         fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["backlog"],
-                                 mode="lines", name="Backlog (acum.)"))
+                                 mode="lines", name="Pendentes"))
         fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd")
         st.plotly_chart(fig, use_container_width=True)
     else:
