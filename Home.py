@@ -67,6 +67,15 @@ PALETTE = {
     "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
 }
 
+PALETTE = {
+    "BG": BG,
+    "PRIMARY_NAVY": PRIMARY_NAVY,
+    "TEXT_MUTED": TEXT_MUTED,
+    "CARD_BORDER": CARD_BORDER,
+    "ACCENT_BLUE": ACCENT_BLUE,
+    "ACCENT_BLUE_LT": ACCENT_BLUE_LT,
+}
+
 _css_tpl = Template("""
 <style>
 [data-testid="stAppViewContainer"] {
@@ -74,7 +83,7 @@ _css_tpl = Template("""
 }
 .block-container {padding-top:2.2rem; padding-bottom:3rem;}
 
-/* Cabeçalho */
+/* Cabecalho */
 h1.page-title { color:$PRIMARY_NAVY; margin:0; }
 .page-sub { color:$TEXT_MUTED; font-size:18px; margin-top:6px; }
 .header-strip {
@@ -100,6 +109,29 @@ h1.page-title { color:$PRIMARY_NAVY; margin:0; }
   transform:translateY(-2px); border-color:#D7E3F5;
   box-shadow:0 16px 36px rgba(30,64,175,.16);
 }
+.card-ico{
+  display:inline-grid; place-items:center;
+  width:68px; height:68px; border-radius:50%;
+  background:$ACCENT_BLUE; color:#fff; font-size:30px;
+  box-shadow:0 6px 16px rgba(30,64,175,.30);
+  margin:2px auto 10px auto;
+}
+.card-title{ font-size:20px; font-weight:700; margin:8px 0 6px 0; }
+.card-hint{ font-size:14px; color:$TEXT_MUTED; min-height:42px; }
+.card-chip{
+  display:inline-block; margin-top:14px; padding:6px 18px; border-radius:20px;
+  background:$ACCENT_BLUE_LT; color:$ACCENT_BLUE;
+  border:1px solid #C9DAFF; font-size:14px; font-weight:600; letter-spacing:.2px;
+}
+
+/* Responsivo */
+@media (max-width:1400px){ #cards-grid{grid-template-columns:repeat(4,1fr);} }
+@media (max-width:1100px){ #cards-grid{grid-template-columns:repeat(3,1fr);} }
+@media (max-width:800px){  #cards-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:520px){  #cards-grid{grid-template-columns:1fr;} }
+</style>
+""")
+st.markdown(_css_tpl.substitute(PALETTE), unsafe_allow_html=True)
 st.markdown("""
 <div style="position:relative;">
   <div style="display:flex; align-items:center; gap:16px;">
