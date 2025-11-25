@@ -147,7 +147,7 @@ st.markdown("""
 </div>
 <div class="hr"></div>
 """, unsafe_allow_html=True)
-}
+
 .card-title{ font-size:20px; font-weight:700; margin:8px 0 6px 0; }
 .card-hint{ font-size:14px; color:$TEXT_MUTED; min-height:42px; }
 .card-chip{
