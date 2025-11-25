@@ -1,6 +1,7 @@
 from __future__ import annotations
 from string import Template
 import streamlit as st
+from PIL import Image  # <-- adiciona isso
 
 # =========================================================
 # Import / Fallback de config
@@ -17,9 +18,11 @@ except Exception:
 # =========================================================
 # Configuração da Página
 # =========================================================
+icon = Image.open("house_3661264.png")
+
 st.set_page_config(
     page_title="CRO/1 - Sistema de Vistorias",
-    page_icon="https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/house_3661264.png",
+    page_icon=icon,  # aqui usa o arquivo local
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -141,22 +144,22 @@ st.markdown(_css_tpl.substitute(PALETTE), unsafe_allow_html=True)
 # =========================================================
 # Cabeçalho com Imagem
 # =========================================================
-col1, col2 = st.columns([0.06, 0.94])
-
-with col1:
-    st.image("https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/house_3661264.png", width=48)
-
-with col2:
-    st.markdown("""
-    <div style="position:relative;">
-      <div>
-        <h1 class="page-title">Navegacao</h1>
-        <div class="page-sub">Clique em um icone para abrir a secao</div>
+st.markdown(
+    """
+    <div style="position:relative; margin-bottom:8px;">
+      <div style="display:flex; align-items:center; gap:16px;">
+        <img src="house_3661264.png" style="width:48px; height:48px;" />
+        <div>
+          <h1 class="page-title">Navegação</h1>
+          <div class="page-sub">Clique em um ícone para abrir a seção</div>
+        </div>
       </div>
-      <div class="header-strip">CRO/1 - Vistorias Tecnicas</div>
+      <div class="header-strip">CRO/1 - Vistorias Técnicas</div>
     </div>
     <div class="hr"></div>
-    """, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 # =========================================================
 # Lista de Cards
