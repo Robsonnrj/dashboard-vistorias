@@ -6,6 +6,9 @@ import pandas as pd
 from core.data_loader import append_row, read_df
 from core.utils import norm, pick_col
 
+# Ícone de pasta (VIS-001) hospedado no GitHub
+ICON_VIS_001 = "https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/folder_15779310.png"
+
 
 def _N(x: str) -> str:
     """Normaliza string: strip + upper (para siglas/chaves)."""
@@ -37,9 +40,12 @@ def _load_oms_validadas() -> pd.DataFrame:
     ])
 
     missings = []
-    if not col_sigla: missings.append("OM/Sigla")
-    if not col_nome:  missings.append("Nome da OM")
-    if not col_dir:   missings.append("Diretoria")
+    if not col_sigla:
+        missings.append("OM/Sigla")
+    if not col_nome:
+        missings.append("Nome da OM")
+    if not col_dir:
+        missings.append("Diretoria")
     if missings:
         with st.expander("🔎 Diagnóstico — colunas disponíveis na aba de validação"):
             st.write(list(df.columns))
@@ -52,8 +58,8 @@ def _load_oms_validadas() -> pd.DataFrame:
 
     df_out = (
         df.rename(columns={col_sigla: "om_sigla", col_nome: "om_nome", col_dir: "diretoria"})
-          [["om_sigla", "om_nome", "diretoria"]]
-          .copy()
+        [["om_sigla", "om_nome", "diretoria"]]
+        .copy()
     )
     # limpeza e normalização
     for c in ["om_sigla", "om_nome", "diretoria"]:
@@ -219,11 +225,20 @@ def page():
     if "tabs_map" not in st.session_state:
         st.session_state["tabs_map"] = {
             "solicitacoes": "ACOMPANHAMENTO VISTORIAS",
-            "validacao":    "Validacao_de_Dados",
-            "auditoria":    "Auditoria_Vistorias",
+            "validacao": "Validacao_de_Dados",
+            "auditoria": "Auditoria_Vistorias",
         }
 
-    st.header("📝 VIS-001 — Cadastro de Solicitação de Vistoria")
+    # Cabeçalho com ícone de pasta + título VIS-001
+    st.markdown(
+        f"""
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:0.8rem;">
+          <img src="{ICON_VIS_001}" style="width:32px; height:32px;" />
+          <h1 style="margin:0; font-size:1.9rem;">VIS-001 — Cadastro de Solicitação de Vistoria</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     tabs_map = st.session_state.get("tabs_map", {})
     tab_solic = tabs_map.get("solicitacoes", "ACOMPANHAMENTO VISTORIAS")
