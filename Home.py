@@ -111,7 +111,7 @@ st.markdown("""
       <div class="page-sub">Clique em um ícone para abrir a seção</div>
     </div>
   </div>
-  <div class="header-strip">CRO/1 — Vistorias Técnicas</div>
+  <div class="header-strip">CRO/1 - Vistorias Técnicas</div>
 </div>
 <div class="hr"></div>
 """, unsafe_allow_html=True)
