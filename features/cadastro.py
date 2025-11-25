@@ -7,8 +7,10 @@ from core.data_loader import append_row, read_df
 from core.utils import norm, pick_col
 
 # Ícone de pasta (VIS-001) hospedado no GitHub
-ICON_VIS_001 = "https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/folder_15779310.png"
-
+ICON_VIS_001 = "https://raw.githubusercontent.com/"
+    "Robsonnrj/dashboard-vistorias/"
+    "e1d7019025420bc3378780fb291eece7a28f10c4/"
+    "folder_15779310.png"
 
 def _N(x: str) -> str:
     """Normaliza string: strip + upper (para siglas/chaves)."""
