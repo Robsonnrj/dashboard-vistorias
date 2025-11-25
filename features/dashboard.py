@@ -23,7 +23,7 @@ def _mes_label(s):
     return s.dt.to_period("M").dt.to_timestamp()
 
 def _fmt_rs(v):
-    if pd.isna(v): 
+    if pd.isna(v):
         return "—"
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -214,13 +214,26 @@ def page():
             return True
         return False
 
-    # flags
-    if COL["dt_solic"]:
-        dff["_pedido"] = dff[COL["dt_solic"]].notna()
-        dff["_mes"] = dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp()
+    # ---------- NOVA LÓGICA DE _pedido E _mes ----------
+    # base para considerar uma linha como "pedido": OM e/ou Diretoria preenchidas
+    base_cols = []
+    if COL["om"]:
+        base_cols.append(COL["om"])
+    if COL["diretoria"]:
+        base_cols.append(COL["diretoria"])
+
+    if base_cols:
+        # pedido = linha que tem pelo menos OM ou Diretoria preenchida
+        dff["_pedido"] = dff[base_cols].notna().any(axis=1)
     else:
         dff["_pedido"] = True
+
+    # mês de referência: continua baseado na DATA DA SOLICITAÇÃO
+    if COL["dt_solic"]:
+        dff["_mes"] = dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp()
+    else:
         dff["_mes"] = pd.NaT
+    # ---------------------------------------------------
 
     dff["_atendida"] = dff.apply(_eh_atendida, axis=1)
     dff["_nao_atendida"] = dff["_pedido"] & (~dff["_atendida"])
@@ -396,7 +409,7 @@ def page():
             doc.add_paragraph(f"Gerado em {datetime.now():%d/%m/%Y %H:%M}")
 
             doc.add_heading("Indicadores Principais", level=2)
-            doc.add_paragraph(f"Total de Vistorias: {len(dff)}")
+            doc.add_paragraph(f"Total de Vistorias (pedidos): {tot_ped}")
             if "Classificação" in dff.columns and not dff.empty:
                 doc.add_paragraph(f"% Emergenciais: {100 * dff['Classificação'].eq('Emergencial').mean():.1f}%")
             if COL["orcamento"] and COL["orcamento"] in dff.columns:
@@ -418,3 +431,6 @@ def page():
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
             )
+
+    # Pequeno debug para conferir contagens
+    st.caption(f"Debug: linhas na base = {len(df)} | após filtros = {len(dff)} | pedidos contabilizados = {tot_ped}")
