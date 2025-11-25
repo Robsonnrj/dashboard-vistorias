@@ -149,7 +149,6 @@ cards = [
     {"k":"2","title":"Dashboard Operacional","icon":"📊","hint":"KPIs, prazos e mapa de calor","path":"pages/Dashboard_operacional.py"},
     {"k":"3","title":"Relatórios","icon":"📑","hint":"Emitir PDFs e planilhas","path":"pages/Relatorios.py"},
     {"k":"4","title":"Status / Andamento","icon":"🔄","hint":"Triagem e acompanhamento","path":"pages/Status_Andamento.py"},
-    {"k":"5","title":"Auditoria","icon":"🕵️","hint":"Logs e rastreabilidade","path":"pages/Auditoria.py"},
 ]
 
 # =========================================================
