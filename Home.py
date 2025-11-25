@@ -139,23 +139,24 @@ h1.page-title { color:$PRIMARY_NAVY; margin:0; }
 st.markdown(_css_tpl.substitute(PALETTE), unsafe_allow_html=True)
 
 # =========================================================
-# Cabeçalho
+# Cabeçalho com Imagem
 # =========================================================
-st.markdown("""
-<div style="position:relative;">
-  <div style="display:flex; align-items:center; gap:16px;">
-    <img src="https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/house_3661264.png" 
-         alt="Home" 
-         style="width:48px; height:48px; object-fit:contain;">
-    <div>
-      <h1 class="page-title">Navegacao</h1>
-      <div class="page-sub">Clique em um icone para abrir a secao</div>
+col1, col2 = st.columns([0.06, 0.94])
+
+with col1:
+    st.image("https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/house_3661264.png", width=48)
+
+with col2:
+    st.markdown("""
+    <div style="position:relative;">
+      <div>
+        <h1 class="page-title">Navegacao</h1>
+        <div class="page-sub">Clique em um icone para abrir a secao</div>
+      </div>
+      <div class="header-strip">CRO/1 - Vistorias Tecnicas</div>
     </div>
-  </div>
-  <div class="header-strip">CRO/1 - Vistorias Tecnicas</div>
-</div>
-<div class="hr"></div>
-""", unsafe_allow_html=True)
+    <div class="hr"></div>
+    """, unsafe_allow_html=True)
 
 # =========================================================
 # Lista de Cards
