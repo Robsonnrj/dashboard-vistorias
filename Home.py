@@ -19,7 +19,7 @@ except Exception:
 # =========================================================
 st.set_page_config(
     page_title="CRO/1 — Sistema de Vistorias",
-    page_icon="https://github.com/Robsonnrj/dashboard-vistorias/blob/fd816b716f66524dba7e821863e178988a690f5b/house_3661264.png" alt="home" width="160" height="160",
+    page_icon="https://raw.githubusercontent.com/Robsonnrj/dashboard-vistorias/main/house_3661264.png",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
