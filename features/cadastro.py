@@ -38,17 +38,25 @@ def _load_oms_validadas() -> pd.DataFrame:
         st.error("Base de validação vazia ou não encontrada.")
         return pd.DataFrame(columns=["om_sigla", "om_nome", "diretoria"])
 
-    col_sigla = pick_col(df, ["sigla", "sigla om", "om (sigla)", "sigla da om", "om sigla", "sigla/om",
-                              "om", "om solicitante (sigla)"])
-    col_nome = pick_col(df, ["organização militar", "organizacao militar", "om nome", "nome da om",
-                             "nome", "unidade/om", "unidade", "om solicitante (nome)"])
-    col_dir = pick_col(df, ["diretoria responsável", "diretoria responsavel", "diretoria",
-                            "dir responsável", "dir responsavel", "direção", "diretoria/om"])
+    # >>>>> AQUI ESTÁ O AJUSTE IMPORTANTE <<<<<
+    # Preferimos "OM" antes de "Sigla" para não confundir com a coluna de órgão setorial
+    col_sigla = pick_col(df, [
+        "om", "OM", "om (sigla)", "om sigla", "om solicitante (sigla)",
+        "sigla om", "sigla da om", "sigla/om", "sigla"
+    ])
+    col_nome = pick_col(df, [
+        "organização militar", "organizacao militar", "om nome", "nome da om",
+        "nome", "unidade/om", "unidade", "om solicitante (nome)"
+    ])
+    col_dir = pick_col(df, [
+        "diretoria responsável", "diretoria responsavel", "diretoria",
+        "dir responsável", "dir responsavel", "direção", "diretoria/om"
+    ])
 
     missings = []
     if not col_sigla: missings.append("OM/Sigla")
-    if not col_nome: missings.append("Nome da OM")
-    if not col_dir: missings.append("Diretoria")
+    if not col_nome:  missings.append("Nome da OM")
+    if not col_dir:   missings.append("Diretoria")
 
     if missings:
         st.error("Colunas não encontradas: " + ", ".join(missings))
@@ -62,9 +70,17 @@ def _load_oms_validadas() -> pd.DataFrame:
     for c in ["om_sigla", "om_nome", "diretoria"]:
         df_out[c] = df_out[c].astype(str).str.strip()
 
+    # mantém apenas linhas com OM e diretoria preenchidas
     df_out = df_out[(df_out["om_sigla"] != "") & (df_out["diretoria"] != "")]
+    # normaliza sigla para evitar duplicados com diferença de caixa/espaço
     df_out["om_sigla_norm"] = df_out["om_sigla"].map(_N)
     df_out = df_out.drop_duplicates(subset=["om_sigla_norm"], keep="first").reset_index(drop=True)
+
+    # (Opcional) diagnóstico rápido
+    with st.expander("🧭 Mapeamento detectado na validação"):
+        st.write(f"OMs válidas encontradas: **{len(df_out)}**")
+        st.dataframe(df_out[["om_sigla", "om_nome", "diretoria"]].head(20), use_container_width=True)
+
     return df_out[["om_sigla", "om_nome", "diretoria", "om_sigla_norm"]]
 
 
