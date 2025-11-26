@@ -6,7 +6,7 @@ except Exception:
     SHEET_TABS = {"solicitacoes":"Solicitacoes","historicos":"Historicos","relatorios":"Relatorios"}
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
-from core.layout import hide_multipage_nav, top_nav
+from core.Layout import hide_multipage_nav, top_nav
 from features.dashboard import page as dashboard_page
 
 def page():
