@@ -76,10 +76,7 @@ def _load_oms_validadas() -> pd.DataFrame:
     df_out["om_sigla_norm"] = df_out["om_sigla"].map(_N)
     df_out = df_out.drop_duplicates(subset=["om_sigla_norm"], keep="first").reset_index(drop=True)
 
-    # (Opcional) diagnóstico rápido
-    with st.expander("🧭 Mapeamento detectado na validação"):
-        st.write(f"OMs válidas encontradas: **{len(df_out)}**")
-        st.dataframe(df_out[["om_sigla", "om_nome", "diretoria"]].head(20), use_container_width=True)
+   
 
     return df_out[["om_sigla", "om_nome", "diretoria", "om_sigla_norm"]]
 
