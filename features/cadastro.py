@@ -205,7 +205,7 @@ def page():
         f"""
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:0.8rem;">
             <img src="data:image/png;base64,{ICON_VIS_001_B64}" style="width:32px; height:32px;" />
-            <h1 style="margin:0; font-size:1.9rem;">VIS-001 — Cadastro de Solicitação de Vistoria</h1>
+            <h1 style="margin:0; font-size:1.9rem;"> Cadastro de Solicitação de Vistoria</h1>
         </div>
         """,
         unsafe_allow_html=True,
