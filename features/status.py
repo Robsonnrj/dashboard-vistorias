@@ -126,7 +126,7 @@ def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) ->
 # Página
 # -----------------------------
 def page():
-    st.header("🔁 VIS-003 — Controle de Status e Auditoria")
+    st.header("🔁  Controle de Status e Auditoria")
 
     # --- Carrega base principal ---
     try:
