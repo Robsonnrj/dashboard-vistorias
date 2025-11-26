@@ -7,14 +7,6 @@ import base64
 
 from core.data_loader import append_row, read_df
 from core.utils import norm, pick_col
-from core.layout import hide_multipage_nav, top_nav
-from features.cadastro import page as cadastro_page  
-
-def page():
-    hide_multipage_nav()
-    top_nav("Cadastro de vistorias")
-
-    cadastro_page()   # chama a função que desenha o formulário
 
 
 # ============================
