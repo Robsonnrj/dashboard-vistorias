@@ -12,7 +12,7 @@ except Exception:
 
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
-from core.layout import hide_multipage_nav, top_nav
+from core.Layout import hide_multipage_nav, top_nav
 from features.cadastro import page as cadastro_page  # função que desenha o formulário
 
 
