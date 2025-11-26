@@ -6,5 +6,11 @@ except Exception:
     SHEET_TABS = {"solicitacoes":"Solicitacoes","historicos":"Historicos","relatorios":"Relatorios"}
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
-from features import cadastro
-cadastro.page()
+from core.layout import hide_multipage_nav, top_nav
+from features.cadastro import page as cadastro_page  
+
+def page():
+    hide_multipage_nav()
+    top_nav("Cadastro de vistorias")
+
+    cadastro_page()   # chama a função que desenha o formulário
