@@ -13,6 +13,10 @@ import pandas as pd
 # carrega dados se precisar buscar algo da base
 from core.data_loader import read_df
 
+from core.layout import hide_multipage_nav
+
+hide_multipage_nav()
+
 # dependência opcional
 try:
     from reportlab.lib.pagesizes import A4
