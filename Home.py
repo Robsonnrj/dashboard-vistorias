@@ -217,4 +217,4 @@ for i in range(0, len(cards), cols_per_row):
 if clicked_path:
     st.switch_page(clicked_path)
 
-st.caption("Dica: use as teclas 1-4 para abrir as secoes rapidamente.")
+
