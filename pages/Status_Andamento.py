@@ -12,7 +12,7 @@ from features.status import page as status_page
 
 def page():
     hide_multipage_nav()
-    top_nav("Status")
+    top_nav("Status_Andamento")
 
     status_page()
 
