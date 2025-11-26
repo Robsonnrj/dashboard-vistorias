@@ -15,14 +15,7 @@ import streamlit as st
 from core.data_loader import read_df
 from core.config import TAB_SOLICITACOES
 from core.utils import pick_col
-from core.layout import hide_multipage_nav, top_nav
-from features.dashboard import page as dashboard_page
 
-def page():
-    hide_multipage_nav()
-    top_nav("Dashboard operacional")
-
-    dashboard_page()
 
 
 # ----------------------- Helpers -----------------------
