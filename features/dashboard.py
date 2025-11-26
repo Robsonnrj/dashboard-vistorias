@@ -353,19 +353,6 @@ def page():
     # ----------------------- Visualizações (as suas originais) -----------------------
     st.subheader("Visualizações Analíticas")
 
-    if COL["dt_solic"]:
-        dff[COL["dt_solic"]] = pd.to_datetime(dff[COL["dt_solic"]], errors="coerce", dayfirst=True)
-        df_mes = (
-            dff.groupby(dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp())
-               .size()
-               .reset_index(name="qtd")
-               .sort_values(COL["dt_solic"])
-        )
-        fig1 = px.line(df_mes, x=COL["dt_solic"], y="qtd",
-                       title="Evolução Mensal das Vistorias", markers=True)
-        fig1.update_traces(line_shape="spline")
-        st.plotly_chart(fig1, use_container_width=True)
-
     if COL["status"]:
         fig2 = px.pie(dff, names=COL["status"], title="Distribuição por Status", hole=0.45)
         st.plotly_chart(fig2, use_container_width=True)
