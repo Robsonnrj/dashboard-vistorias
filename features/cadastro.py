@@ -7,6 +7,9 @@ import base64
 
 from core.data_loader import append_row, read_df
 from core.utils import norm, pick_col
+from core.layout import hide_multipage_nav
+
+hide_multipage_nav()
 
 # ============================
 # Helper para converter imagens locais em Base64 (robusto)
