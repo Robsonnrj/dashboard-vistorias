@@ -6,12 +6,13 @@ except Exception:
     SHEET_TABS = {"solicitacoes":"Solicitacoes","historicos":"Historicos","relatorios":"Relatorios"}
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 from core.layout import hide_multipage_nav, top_nav
-from features.status import page as status_page
+from features.status import page as status_page  # ajusta o import conforme seu arquivo
 
 def page():
     hide_multipage_nav()
-    top_nav("Status_Andamento")
-
+    top_nav("Status / Andamento")
     status_page()
+
+page()
 
 
