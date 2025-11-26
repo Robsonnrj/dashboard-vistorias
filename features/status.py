@@ -8,6 +8,10 @@ from core.config import TAB_SOLICITACOES, TAB_AUDIT, TAB_VALIDACAO
 from core.data_loader import read_df, overwrite_tab_from_df
 from core.utils import pick_col
 
+from core.layout import hide_multipage_nav
+
+hide_multipage_nav()
+
 # Inicializa tabs_map se não existir
 if "tabs_map" not in st.session_state:
     st.session_state["tabs_map"] = {
