@@ -7,4 +7,13 @@ except Exception:
 st.session_state.setdefault("tabs_map", dict(SHEET_TABS))
 
 from features import status
+from core.layout import hide_multipage_nav, top_nav
+from features.status import page as status_page
+
+def page():
+    hide_multipage_nav()
+    top_nav("Status")
+
+    status_page()
+
 status.page()
