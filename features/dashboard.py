@@ -15,6 +15,9 @@ import streamlit as st
 from core.data_loader import read_df
 from core.config import TAB_SOLICITACOES
 from core.utils import pick_col
+from core.layout import hide_multipage_nav
+
+hide_multipage_nav()
 
 
 # ----------------------- Helpers -----------------------
