@@ -14,5 +14,3 @@ def page():
 
     relatorios_page()
 
-from features import relatorios
-(getattr(relatorios, "page", getattr(relatorios, "ui_relatorios", None)))()
