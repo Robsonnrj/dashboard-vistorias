@@ -4,7 +4,7 @@ import streamlit as st
 from PIL import Image 
 from pathlib import Path
 import base64
-from core.layout import hide_multipage_nav, top_nav
+from core.Layout import hide_multipage_nav, top_nav
 
 def page():
     hide_multipage_nav()
