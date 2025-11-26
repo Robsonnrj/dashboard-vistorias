@@ -25,3 +25,10 @@ def pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
             if tgt in nc:
                 return orig
     return None
+
+def clean(x) -> str:
+    return "" if pd.isna(x) else str(x).strip()
+
+def date_or(x, default: pd.Timestamp) -> pd.Timestamp:
+    d = pd.to_datetime(x, errors="coerce")
+    return d if pd.notna(d) else default

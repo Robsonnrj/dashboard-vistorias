@@ -23,7 +23,7 @@ def _mes_label(s):
     return s.dt.to_period("M").dt.to_timestamp()
 
 def _fmt_rs(v):
-    if pd.isna(v): 
+    if pd.isna(v):
         return "—"
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -214,13 +214,26 @@ def page():
             return True
         return False
 
-    # flags
-    if COL["dt_solic"]:
-        dff["_pedido"] = dff[COL["dt_solic"]].notna()
-        dff["_mes"] = dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp()
+    # ---------- NOVA LÓGICA DE _pedido E _mes ----------
+    # base para considerar uma linha como "pedido": OM e/ou Diretoria preenchidas
+    base_cols = []
+    if COL["om"]:
+        base_cols.append(COL["om"])
+    if COL["diretoria"]:
+        base_cols.append(COL["diretoria"])
+
+    if base_cols:
+        # pedido = linha que tem pelo menos OM ou Diretoria preenchida
+        dff["_pedido"] = dff[base_cols].notna().any(axis=1)
     else:
         dff["_pedido"] = True
+
+    # mês de referência: continua baseado na DATA DA SOLICITAÇÃO
+    if COL["dt_solic"]:
+        dff["_mes"] = dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp()
+    else:
         dff["_mes"] = pd.NaT
+    # ---------------------------------------------------
 
     dff["_atendida"] = dff.apply(_eh_atendida, axis=1)
     dff["_nao_atendida"] = dff["_pedido"] & (~dff["_atendida"])
@@ -262,7 +275,7 @@ def page():
     c2.metric("Atendidas", f"{tot_atd}")
     c3.metric("% Atendimento", f"{pct_atd:.1f}%" if pd.notna(pct_atd) else "—")
     c4.metric("Tempo médio de atendimento", f"{tempo_medio:.1f} dias" if pd.notna(tempo_medio) else "—")
-    c5.metric("Backlog acumulado", int(mensal["backlog"].iloc[-1]) if not mensal.empty else 0)
+    c5.metric("Pendentes", int(mensal["backlog"].iloc[-1]) if not mensal.empty else 0)
 
     # Linha: Pedidos x Atendidas (+ backlog)
     st.subheader("Evolução mensal — Pedidos x Atendidas")
@@ -273,7 +286,7 @@ def page():
         fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["atendidas"],
                                  mode="lines+markers", name="Atendidas"))
         fig.add_trace(go.Scatter(x=mensal["_mes"], y=mensal["backlog"],
-                                 mode="lines", name="Backlog (acum.)"))
+                                 mode="lines", name="Pendentes"))
         fig.update_layout(xaxis_title="Mês", yaxis_title="Qtd")
         st.plotly_chart(fig, use_container_width=True)
     else:
@@ -340,19 +353,6 @@ def page():
     # ----------------------- Visualizações (as suas originais) -----------------------
     st.subheader("Visualizações Analíticas")
 
-    if COL["dt_solic"]:
-        dff[COL["dt_solic"]] = pd.to_datetime(dff[COL["dt_solic"]], errors="coerce", dayfirst=True)
-        df_mes = (
-            dff.groupby(dff[COL["dt_solic"]].dt.to_period("M").dt.to_timestamp())
-               .size()
-               .reset_index(name="qtd")
-               .sort_values(COL["dt_solic"])
-        )
-        fig1 = px.line(df_mes, x=COL["dt_solic"], y="qtd",
-                       title="Evolução Mensal das Vistorias", markers=True)
-        fig1.update_traces(line_shape="spline")
-        st.plotly_chart(fig1, use_container_width=True)
-
     if COL["status"]:
         fig2 = px.pie(dff, names=COL["status"], title="Distribuição por Status", hole=0.45)
         st.plotly_chart(fig2, use_container_width=True)
@@ -396,7 +396,7 @@ def page():
             doc.add_paragraph(f"Gerado em {datetime.now():%d/%m/%Y %H:%M}")
 
             doc.add_heading("Indicadores Principais", level=2)
-            doc.add_paragraph(f"Total de Vistorias: {len(dff)}")
+            doc.add_paragraph(f"Total de Vistorias (pedidos): {tot_ped}")
             if "Classificação" in dff.columns and not dff.empty:
                 doc.add_paragraph(f"% Emergenciais: {100 * dff['Classificação'].eq('Emergencial').mean():.1f}%")
             if COL["orcamento"] and COL["orcamento"] in dff.columns:
@@ -418,3 +418,6 @@ def page():
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 use_container_width=True,
             )
+
+    # Pequeno debug para conferir contagens
+    st.caption(f"Debug: linhas na base = {len(df)} | após filtros = {len(dff)} | pedidos contabilizados = {tot_ped}")

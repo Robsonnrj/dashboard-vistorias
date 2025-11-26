@@ -126,14 +126,9 @@ def _collect_changes(orig_row: pd.Series, new_row: pd.Series, cols_map: dict) ->
 # Página
 # -----------------------------
 def page():
-    st.header("🔁 VIS-003 — Controle de Status e Auditoria")
-    tab_base = st.session_state["tabs_map"]["solicitacoes"]
-    df = read_df(tab_base)
-    if df.empty:
-        st.info("Sem dados para auditoria.")
-        return
-    col_num = pick_col(df, ["numero", "número", "num", "nº", "id", "protocolo"])
+    st.header("🔁  Controle de Status e Auditoria")
 
+    # --- Carrega base principal ---
     try:
         df = read_df(TAB_SOLICITACOES)
     except Exception as e:
@@ -155,14 +150,28 @@ def page():
     c_stw = cols.get("status - atualização semanal") or cols.get("status - atualizacao semanal")
     c_obs = cols.get("observações") or cols.get("observacoes")
 
+    # >>> FILTRO PARA ESCONDER REGISTROS FINALIZADOS <<<
+    if c_sit and c_sit in df.columns:
+        mask_nao_final = ~df[c_sit].astype(str).str.strip().str.lower().eq("finalizada")
+        df = df[mask_nao_final].copy()
+
+    if df.empty:
+        st.info("Todas as vistorias estão com situação 'Finalizada'. Não há registros pendentes para edição.")
+        return
+    # ---------------------------------------------------
+
     st.subheader("Selecione o registro para editar")
+
     show_cols = [x for x in [c_obj, c_om, c_dir, c_sit, c_dtS] if x in df.columns]
     show = df[show_cols].copy() if show_cols else df.copy()
     show = show.reset_index().rename(columns={"index": "linha"})
+
     idx = st.selectbox(
         "Registro",
         options=show["linha"].tolist(),
-        format_func=lambda i: " | ".join([_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]),
+        format_func=lambda i: " | ".join(
+            [_clean(x) for x in show.loc[show["linha"] == i, show_cols].iloc[0].tolist()]
+        ),
     )
     if idx is None:
         return
