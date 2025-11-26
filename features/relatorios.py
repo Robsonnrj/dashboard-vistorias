@@ -12,10 +12,14 @@ import pandas as pd
 
 # carrega dados se precisar buscar algo da base
 from core.data_loader import read_df
+from core.layout import hide_multipage_nav, top_nav
+from features.relatorios import page as relatorios_page
 
-from core.layout import hide_multipage_nav
+def page():
+    hide_multipage_nav()
+    top_nav("Relatorios")
 
-hide_multipage_nav()
+    relatorios_page()
 
 # dependência opcional
 try:
