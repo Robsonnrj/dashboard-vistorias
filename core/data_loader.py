@@ -37,7 +37,7 @@ def _make_unique_headers(headers: list[str]) -> list[str]:
 
 
 def has_gsheets() -> bool:
-    """Verifica se as credenciais do Google Sheets estão disponíveis."""
+    """Verifica se as credenciais do Google Sheets estão disponíveis..."""
     return (
         "gcp_service_account" in st.secrets
         and "gsheets" in st.secrets
